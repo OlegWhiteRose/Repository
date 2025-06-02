@@ -22,10 +22,11 @@ class BaseTableWindow(QMainWindow):
     # Сигнал для обновления связанных окон
     data_changed = pyqtSignal()
     
-    def __init__(self, parent=None, title="Table Window"):
+    def __init__(self, parent=None, title="Table Window", user_role="user"):
         super().__init__(parent)
         self.parent = parent
         self.setWindowTitle(title)
+        self.user_role = user_role
         self.setGeometry(150, 150, 1000, 600)
         
         # Создаем центральный виджет и главный layout
@@ -74,37 +75,42 @@ class BaseTableWindow(QMainWindow):
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_context_menu)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        self.table.itemSelectionChanged.connect(self.update_navigation_buttons)
+        self.table.itemSelectionChanged.connect(self.on_selection_changed)
         self.main_layout.addWidget(self.table)
         
     def create_bottom_panel(self):
         """Создает нижнюю панель с кнопками действий"""
         bottom_panel = QHBoxLayout()
         
-        # Кнопки действий
-        add_button = QPushButton("Добавить")
-        edit_button = QPushButton("Изменить")
-        delete_button = QPushButton("Удалить")
+        # Кнопки действий только для админа
+        if self.user_role == "admin":
+            self.add_button = QPushButton("Добавить")
+            self.add_button.clicked.connect(self.add_record)
+            bottom_panel.addWidget(self.add_button)
+            
+            self.edit_button = QPushButton("Изменить")
+            self.edit_button.clicked.connect(self.edit_record)
+            self.edit_button.setEnabled(False)
+            bottom_panel.addWidget(self.edit_button)
+            
+            self.delete_button = QPushButton("Удалить")
+            self.delete_button.clicked.connect(self.delete_record)
+            self.delete_button.setEnabled(False)
+            bottom_panel.addWidget(self.delete_button)
         
-        add_button.clicked.connect(self.add_record)
-        edit_button.clicked.connect(self.edit_record)
-        delete_button.clicked.connect(self.delete_record)
-        
-        bottom_panel.addWidget(add_button)
-        bottom_panel.addWidget(edit_button)
-        bottom_panel.addWidget(delete_button)
         bottom_panel.addStretch()
         
         self.main_layout.addLayout(bottom_panel)
         
     def create_navigation_panel(self):
         """Создает панель навигации со связанными таблицами"""
-        nav_panel = QGroupBox("Навигация")
+        self.nav_group = QGroupBox("Навигация")
         self.nav_layout = QHBoxLayout()
         self.nav_layout.addWidget(QLabel("Перейти к:"))
         self.nav_layout.addStretch()
-        nav_panel.setLayout(self.nav_layout)
-        self.main_layout.addWidget(nav_panel)
+        self.nav_group.setLayout(self.nav_layout)
+        self.nav_group.hide()  # По умолчанию скрыта
+        self.main_layout.addWidget(self.nav_group)
         
     def add_navigation_button(self, text, callback):
         """Добавляет кнопку навигации"""
@@ -112,16 +118,25 @@ class BaseTableWindow(QMainWindow):
         button.clicked.connect(callback)
         button.setEnabled(False)  # По умолчанию кнопки неактивны
         self.nav_layout.insertWidget(self.nav_layout.count() - 1, button)
+        self.nav_group.show()
         return button
         
-    def update_navigation_buttons(self):
-        """Обновляет состояние кнопок навигации"""
-        current_row = self.table.currentRow()
-        # Находим все кнопки в панели навигации
+    def on_selection_changed(self):
+        """Обработчик изменения выделения в таблице"""
+        has_selection = len(self.table.selectedItems()) > 0
+        
+        if self.user_role == "admin":
+            self.edit_button.setEnabled(has_selection)
+            self.delete_button.setEnabled(has_selection)
+            
+        # Активируем навигационные кнопки
         for i in range(self.nav_layout.count()):
             widget = self.nav_layout.itemAt(i).widget()
             if isinstance(widget, QPushButton):
-                widget.setEnabled(current_row >= 0)
+                widget.setEnabled(has_selection)
+                
+        if has_selection:
+            self.show_related_records(self.table.currentRow())
         
     def show_context_menu(self, position):
         """Показывает контекстное меню для строки таблицы"""

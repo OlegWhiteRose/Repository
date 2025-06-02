@@ -17,6 +17,7 @@ from .table_windows.deposits_window import DepositsWindow
 from .table_windows.transactions_window import TransactionsWindow
 from .table_windows.employees_window import EmployeesWindow
 from .table_windows.reports_window import ReportsWindow
+from .statistics_window import StatisticsWindow
 
 from database.db import Database
 from .clients_tab import ClientsTab
@@ -63,12 +64,20 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
         
-        # Заголовок с информацией о пользователе
+        # Верхняя панель с информацией о пользователе и кнопкой выхода
         header_layout = QHBoxLayout()
+        
+        # Информация о пользователе
         user_info = QLabel(f"Пользователь: {self.username} ({self.user_role})")
         user_info.setFont(QFont("Arial", 10, QFont.Bold))
         header_layout.addWidget(user_info)
-        header_layout.addStretch()
+        
+        # Кнопка выхода
+        logout_button = QPushButton("Выйти")
+        logout_button.setFixedWidth(100)
+        logout_button.clicked.connect(self.logout)
+        header_layout.addWidget(logout_button)
+        
         main_layout.addLayout(header_layout)
         
         # Создаем кнопки для разных разделов
@@ -112,6 +121,12 @@ class MainWindow(QMainWindow):
             reports_button.clicked.connect(self.open_reports_window)
             buttons_layout.addWidget(reports_button)
             
+        # Кнопка "Статистика"
+        statistics_button = QPushButton("Статистика")
+        statistics_button.setMinimumHeight(50)
+        statistics_button.clicked.connect(self.open_statistics_window)
+        buttons_layout.addWidget(statistics_button)
+        
         buttons_layout.addStretch()
         main_layout.addLayout(buttons_layout)
         
@@ -124,30 +139,51 @@ class MainWindow(QMainWindow):
         
     def open_clients_window(self):
         """Открывает окно работы с клиентами"""
-        window = ClientsWindow(self)
+        window = ClientsWindow(self, user_role=self.user_role)
         window.show()
         
     def open_documents_window(self):
         """Открывает окно работы с документами"""
-        window = DocumentsWindow(self)
+        window = DocumentsWindow(self, user_role=self.user_role)
         window.show()
         
     def open_deposits_window(self):
         """Открывает окно работы с вкладами"""
-        window = DepositsWindow(self)
+        window = DepositsWindow(self, user_role=self.user_role)
         window.show()
         
     def open_transactions_window(self):
         """Открывает окно работы с транзакциями"""
-        window = TransactionsWindow(self)
+        window = TransactionsWindow(self, user_role=self.user_role)
         window.show()
         
     def open_employees_window(self):
         """Открывает окно работы с сотрудниками"""
-        window = EmployeesWindow(self)
+        window = EmployeesWindow(self, user_role=self.user_role)
         window.show()
         
     def open_reports_window(self):
         """Открывает окно работы с отчетами"""
-        window = ReportsWindow(self)
+        window = ReportsWindow(self, user_role=self.user_role)
         window.show()
+        
+    def open_statistics_window(self):
+        """Открывает окно статистики"""
+        window = StatisticsWindow(self)
+        window.show()
+        
+    def logout(self):
+        """Выход из системы"""
+        reply = QMessageBox.question(
+            self,
+            'Подтверждение',
+            'Вы действительно хотите выйти?',
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            from .login_window import LoginWindow
+            self.login_window = LoginWindow()
+            self.login_window.show()
+            self.close()

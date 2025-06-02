@@ -8,6 +8,7 @@ from PyQt5.QtCore import Qt
 from ui.login_dialog import LoginDialog
 from ui.main_window import MainWindow
 import psycopg2  # Импортируем для ловли OperationalError
+from ui.login_window import LoginWindow
 
 
 def set_glass_dark_palette(app):
@@ -38,20 +39,11 @@ def main():
     app.setStyle("Fusion")  # Use Fusion style for better cross-platform look
 
     # Show login dialog
-    login_dialog = LoginDialog()
-    if login_dialog.exec_() == LoginDialog.Accepted:
-        # Get user credentials
-        username = login_dialog.get_username()
-        user_role = login_dialog.get_user_role()
+    window = LoginWindow()
+    window.show()
 
-        # Create and show main window
-        main_window = MainWindow(username, user_role)
-        main_window.show()
-
-        # Start event loop
-        return app.exec_()
-    
-    return 0
+    # Start event loop
+    return app.exec_()
 
 
 if __name__ == "__main__":

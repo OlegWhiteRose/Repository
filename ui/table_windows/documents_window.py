@@ -93,9 +93,9 @@ class DocumentDialog(QDialog):
         }
 
 class DocumentsWindow(BaseTableWindow):
-    def __init__(self, parent=None, client_id=None, client_name=None):
+    def __init__(self, parent=None, client_id=None, client_name=None, user_role="user"):
         title = f"Документы - {client_name}" if client_name else "Документы"
-        super().__init__(parent, title)
+        super().__init__(parent, title=title, user_role=user_role)
         self.db = Database()
         self.client_id = client_id
         self.client_name = client_name
@@ -108,6 +108,8 @@ class DocumentsWindow(BaseTableWindow):
         """Настраивает кнопки навигации"""
         if not self.client_id:  # Если окно открыто не из окна клиента
             self.add_navigation_button("Клиент", self.show_client)
+        else:  # Если окно открыто из окна клиента
+            self.add_navigation_button("Вклады", self.show_deposits)
             
     def show_client(self):
         """Открывает окно клиента для выбранного документа"""
@@ -139,6 +141,11 @@ class DocumentsWindow(BaseTableWindow):
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось открыть окно клиента: {str(e)}")
         
+    def show_deposits(self):
+        """Открывает окно вкладов для текущего клиента"""
+        deposits_window = DepositsWindow(self, self.client_id, self.client_name, self.user_role)
+        deposits_window.show()
+        
     def setup_search_panel(self):
         """Настраивает панель поиска"""
         search_group = QGroupBox("Поиск")
@@ -167,7 +174,7 @@ class DocumentsWindow(BaseTableWindow):
         self.table.setColumnCount(8)
         self.table.setHorizontalHeaderLabels([
             "ID", "Номер паспорта", "Дата рождения", "Пол",
-            "ID клиента", "Дата договора", "Кодовое слово", "Статус"
+            "Клиент", "Дата договора", "Кодовое слово", "Статус"
         ])
         
     def refresh_table(self):
@@ -175,8 +182,10 @@ class DocumentsWindow(BaseTableWindow):
         try:
             base_query = """
                 SELECT d.id, d.passport_number, d.birth_date, d.gender,
-                       d.client_id, d.agreement_date, d.security_word, d.agreement_status
+                       c.last_name || ' ' || c.first_name as client_name,
+                       d.agreement_date, d.security_word, d.agreement_status
                 FROM Document d
+                JOIN Client c ON d.client_id = c.id
                 WHERE (d.passport_number LIKE %s OR %s = '')
                   AND (d.agreement_status = %s OR %s = 'Все статусы')
             """
@@ -202,7 +211,7 @@ class DocumentsWindow(BaseTableWindow):
                     if isinstance(cell_data, datetime):
                         cell_data = cell_data.strftime("%Y-%m-%d")
                     item = QTableWidgetItem(str(cell_data))
-                    if col_num in [0, 4]:  # ID columns
+                    if col_num in [0]:  # ID column
                         item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                     self.table.setItem(row_num, col_num, item)
                     

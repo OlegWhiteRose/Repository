@@ -285,10 +285,12 @@ class ReportDialog(QDialog):
         }
 
 class ReportsWindow(BaseTableWindow):
-    def __init__(self, parent=None):
-        super().__init__(parent, "Отчеты")
+    def __init__(self, parent=None, employee_id=None, employee_name=None, user_role="user"):
+        title = f"Отчеты - {employee_name}" if employee_name else "Отчеты"
+        super().__init__(parent, title=title, user_role=user_role)
         self.db = Database()
-        self.current_report_type = None
+        self.employee_id = employee_id
+        self.employee_name = employee_name
         self.setup_search_panel()
         self.setup_table()
         self.setup_navigation()

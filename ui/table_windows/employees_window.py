@@ -105,8 +105,8 @@ class EmployeeDialog(QDialog):
         }
 
 class EmployeesWindow(BaseTableWindow):
-    def __init__(self, parent=None):
-        super().__init__(parent, "Сотрудники")
+    def __init__(self, parent=None, user_role="user"):
+        super().__init__(parent, title="Сотрудники", user_role=user_role)
         self.db = Database()
         self.setup_search_panel()
         self.setup_table()

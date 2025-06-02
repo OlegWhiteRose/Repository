@@ -71,8 +71,8 @@ class ClientDialog(QDialog):
         }
 
 class ClientsWindow(BaseTableWindow):
-    def __init__(self, parent=None):
-        super().__init__(parent, "Клиенты")
+    def __init__(self, parent=None, user_role="user"):
+        super().__init__(parent, title="Клиенты", user_role=user_role)
         self.db = Database()
         self.setup_search_panel()
         self.setup_table()
@@ -262,40 +262,5 @@ class ClientsWindow(BaseTableWindow):
                 
     def show_related_records(self, row):
         """Показывает связанные записи для выбранного клиента"""
-        if row < 0:
-            return
-            
-        client_id = self.table.item(row, 0).text()
-        client_name = f"{self.table.item(row, 1).text()} {self.table.item(row, 2).text()}"
-        
-        # Создаем меню выбора связанных записей
-        dialog = QDialog(self)
-        dialog.setWindowTitle(f"Связанные записи - {client_name}")
-        layout = QVBoxLayout(dialog)
-        
-        # Кнопки для разных типов связанных записей
-        documents_button = QPushButton("Документы")
-        deposits_button = QPushButton("Вклады")
-        
-        # Подключаем обработчики
-        documents_button.clicked.connect(
-            lambda: self.open_documents_window(client_id, client_name)
-        )
-        deposits_button.clicked.connect(
-            lambda: self.open_deposits_window(client_id, client_name)
-        )
-        
-        layout.addWidget(documents_button)
-        layout.addWidget(deposits_button)
-        
-        dialog.exec_()
-        
-    def open_documents_window(self, client_id, client_name):
-        """Открывает окно с документами клиента"""
-        documents_window = DocumentsWindow(self, client_id, client_name)
-        documents_window.show()
-        
-    def open_deposits_window(self, client_id, client_name):
-        """Открывает окно с вкладами клиента"""
-        deposits_window = DepositsWindow(self, client_id, client_name)
-        deposits_window.show() 
+        # При выделении записи ничего не открываем автоматически
+        pass 

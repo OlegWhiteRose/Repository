@@ -89,9 +89,9 @@ class TransactionDialog(QDialog):
         }
 
 class TransactionsWindow(BaseTableWindow):
-    def __init__(self, parent=None, deposit_id=None, deposit_info=None):
+    def __init__(self, parent=None, deposit_id=None, deposit_info=None, user_role="user"):
         title = f"Транзакции - {deposit_info}" if deposit_info else "Транзакции"
-        super().__init__(parent, title)
+        super().__init__(parent, title=title, user_role=user_role)
         self.db = Database()
         self.deposit_id = deposit_id
         self.deposit_info = deposit_info
@@ -181,7 +181,7 @@ class TransactionsWindow(BaseTableWindow):
         """Настраивает структуру таблицы"""
         self.table.setColumnCount(5)
         self.table.setHorizontalHeaderLabels([
-            "ID", "Сумма", "Дата", "Тип операции", "ID вклада"
+            "ID", "Сумма", "Дата", "Тип операции", "Вклад"
         ])
         
     def refresh_table(self):
@@ -189,8 +189,7 @@ class TransactionsWindow(BaseTableWindow):
         try:
             base_query = """
                 SELECT t.id, t.amount, t.date, t.type,
-                       c.last_name || ' ' || c.first_name as client_name,
-                       d.type as deposit_type
+                       d.type || ' (' || c.last_name || ' ' || c.first_name || ')' as deposit_info
                 FROM Transaction t
                 JOIN Deposit d ON t.deposit_id = d.id
                 JOIN Client c ON d.client_id = c.id

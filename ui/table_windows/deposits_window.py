@@ -123,9 +123,9 @@ class DepositDialog(QDialog):
         }
 
 class DepositsWindow(BaseTableWindow):
-    def __init__(self, parent=None, client_id=None, client_name=None):
+    def __init__(self, parent=None, client_id=None, client_name=None, user_role="user"):
         title = f"Вклады - {client_name}" if client_name else "Вклады"
-        super().__init__(parent, title)
+        super().__init__(parent, title=title, user_role=user_role)
         self.db = Database()
         self.client_id = client_id
         self.client_name = client_name
@@ -229,7 +229,7 @@ class DepositsWindow(BaseTableWindow):
         self.table.setColumnCount(9)
         self.table.setHorizontalHeaderLabels([
             "ID", "Сумма", "Дата закрытия", "Дата открытия",
-            "Процентная ставка", "Статус", "Срок", "Тип", "ID клиента"
+            "Процентная ставка", "Статус", "Срок", "Тип", "Клиент"
         ])
         
     def refresh_table(self):
@@ -237,8 +237,10 @@ class DepositsWindow(BaseTableWindow):
         try:
             base_query = """
                 SELECT d.id, d.amount, d.close_date, d.open_date,
-                       d.interest_rate, d.status, d.term, d.type, d.client_id
+                       d.interest_rate, d.status, d.term, d.type,
+                       c.last_name || ' ' || c.first_name as client_name
                 FROM Deposit d
+                JOIN Client c ON d.client_id = c.id
                 WHERE (d.type = %s OR %s = 'Все типы')
                   AND (d.status = %s OR %s = 'Все статусы')
                   AND d.amount BETWEEN %s AND %s
@@ -274,7 +276,7 @@ class DepositsWindow(BaseTableWindow):
                     elif isinstance(cell_data, (float, int)) and col_num == 1:  # amount
                         cell_data = f"{float(cell_data):.2f}"
                     item = QTableWidgetItem(str(cell_data) if cell_data is not None else "")
-                    if col_num in [0, 8]:  # ID columns
+                    if col_num in [0]:  # ID column
                         item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                     self.table.setItem(row_num, col_num, item)
                     
