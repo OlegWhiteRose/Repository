@@ -38,39 +38,43 @@ class ClientsTab(QWidget):
     def init_ui(self):
         layout = QVBoxLayout(self)
 
-        # Search Bar
+        # Search
         search_layout = QHBoxLayout()
-        search_layout.addWidget(QLabel("Поиск:"))
         
+        search_fname_label = QLabel("Имя:")
         self.search_fname_input = QLineEdit()
-        self.search_fname_input.setPlaceholderText("По имени...")
+        self.search_fname_input.setPlaceholderText("Введите имя...")
         self.search_fname_input.textChanged.connect(self.on_search_text_changed)
         
+        search_lname_label = QLabel("Фамилия:")
         self.search_lname_input = QLineEdit()
-        self.search_lname_input.setPlaceholderText("По фамилии...")
+        self.search_lname_input.setPlaceholderText("Введите фамилию...")
         self.search_lname_input.textChanged.connect(self.on_search_text_changed)
         
+        search_phone_label = QLabel("Телефон:")
         self.search_phone_input = QLineEdit()
-        self.search_phone_input.setPlaceholderText("По телефону...")
+        self.search_phone_input.setPlaceholderText("Введите телефон...")
         self.search_phone_input.textChanged.connect(self.on_search_text_changed)
-
-        self.clear_search_btn = QPushButton()
-        self.clear_search_btn.setIcon(QIcon.fromTheme("edit-clear"))
-        self.clear_search_btn.setToolTip("Очистить поиск")
-        self.clear_search_btn.clicked.connect(self.clear_search)
-
+        
+        clear_search_btn = QPushButton("Очистить")
+        clear_search_btn.clicked.connect(self.clear_search)
+        
+        search_layout.addWidget(search_fname_label)
         search_layout.addWidget(self.search_fname_input)
+        search_layout.addWidget(search_lname_label)
         search_layout.addWidget(self.search_lname_input)
+        search_layout.addWidget(search_phone_label)
         search_layout.addWidget(self.search_phone_input)
-        search_layout.addWidget(self.clear_search_btn)
-        search_layout.addStretch(1)
-
+        search_layout.addWidget(clear_search_btn)
+        
         # Toolbar
         toolbar = QHBoxLayout()
+        
         self.add_btn = QPushButton(QIcon.fromTheme("list-add"), " Добавить")
         self.add_btn.clicked.connect(self.add_client)
+        self.add_btn.setEnabled(self.is_admin)
         
-        self.edit_btn = QPushButton(QIcon.fromTheme("document-edit"), " Редактировать")
+        self.edit_btn = QPushButton(QIcon.fromTheme("document-edit"), " Изменить")
         self.edit_btn.clicked.connect(self.edit_client)
         self.edit_btn.setEnabled(False)
         
@@ -111,7 +115,6 @@ class ClientsTab(QWidget):
         self.table.verticalHeader().setVisible(False)
         
         self.table.itemSelectionChanged.connect(self.on_selection_changed)
-        self.table.doubleClicked.connect(self.edit_client_on_double_click)
 
         layout.addLayout(search_layout)
         layout.addLayout(toolbar)
@@ -133,20 +136,30 @@ class ClientsTab(QWidget):
         fname = self.search_fname_input.text().strip()
         lname = self.search_lname_input.text().strip()
         phone = self.search_phone_input.text().strip()
-
-        fname_param = f"%{fname}%" if fname else None
-        lname_param = f"%{lname}%" if lname else None
-        phone_param = f"%{phone}%" if phone else None
-
+        
         try:
             with self.db.get_connection() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute(
-                        Queries.GET_ALL_CLIENTS,
-                        (fname_param, fname_param, lname_param, lname_param, phone_param, phone_param)
-                    )
+                    # Базовый запрос
+                    query = "SELECT id, first_name, last_name, phone FROM Client WHERE 1=1"
+                    params = []
+                    
+                    # Добавляем условия поиска
+                    if fname:
+                        query += " AND LOWER(first_name) LIKE LOWER(%s)"
+                        params.append(f"%{fname}%")
+                    if lname:
+                        query += " AND LOWER(last_name) LIKE LOWER(%s)"
+                        params.append(f"%{lname}%")
+                    if phone:
+                        query += " AND phone LIKE %s"
+                        params.append(f"%{phone}%")
+                    
+                    query += " ORDER BY last_name, first_name"
+                    
+                    cursor.execute(query, params)
                     clients = cursor.fetchall()
-
+                    
                     self.table.setRowCount(len(clients))
                     for row, client in enumerate(clients):
                         # ID
@@ -164,9 +177,13 @@ class ClientsTab(QWidget):
                         phone_item = QTableWidgetItem(client[3])
                         phone_item.setTextAlignment(Qt.AlignCenter)
                         self.table.setItem(row, 3, phone_item)
-
+                        
         except psycopg2.Error as e:
-            QMessageBox.critical(self, "Ошибка БД", f"Не удалось загрузить данные клиентов:\n{str(e)}")
+            QMessageBox.critical(
+                self,
+                "Ошибка БД",
+                f"Не удалось загрузить список клиентов:\n{str(e)}"
+            )
             self.table.setRowCount(0)
 
     def on_selection_changed(self):
@@ -198,66 +215,82 @@ class ClientsTab(QWidget):
             except psycopg2.Error as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось добавить клиента:\n{str(e)}")
 
-    def edit_client_on_double_click(self, index):
-        if self.edit_btn.isEnabled():
-            self.edit_client()
-
     def edit_client(self):
         client_id = self.get_selected_client_id()
-        if not client_id:
+        if client_id is None:
+            QMessageBox.warning(self, "Внимание", "Выберите клиента для редактирования")
             return
-
-        dialog = ClientDialog(self, client_id)
+            
+        dialog = ClientDialog(self, client_id=client_id)
         if dialog.exec_() == QDialog.Accepted:
             try:
                 with self.db.get_connection() as conn:
                     with conn.cursor() as cursor:
                         data = dialog.get_data()
+                        data["id"] = client_id
                         cursor.execute(
                             Queries.UPDATE_CLIENT,
-                            (*data, client_id)
+                            data
                         )
                         conn.commit()
                         QMessageBox.information(self, "Успех", "Данные клиента обновлены")
                         self.load_data()
             except psycopg2.Error as e:
-                QMessageBox.critical(self, "Ошибка", f"Не удалось обновить данные клиента:\n{str(e)}")
+                QMessageBox.critical(
+                    self,
+                    "Ошибка",
+                    f"Не удалось обновить данные клиента:\n{str(e)}"
+                )
 
     def delete_client(self):
         client_id = self.get_selected_client_id()
-        if not client_id:
+        if client_id is None:
+            QMessageBox.warning(self, "Внимание", "Выберите клиента для удаления")
             return
-
+            
         reply = QMessageBox.question(
             self,
-            "Подтверждение удаления",
-            "Вы уверены, что хотите удалить этого клиента?\n"
-            "Все связанные документы, вклады и транзакции также будут удалены.",
+            "Подтверждение",
+            "Вы уверены, что хотите удалить этого клиента?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
-
+        
         if reply == QMessageBox.Yes:
             try:
                 with self.db.get_connection() as conn:
                     with conn.cursor() as cursor:
-                        cursor.execute(Queries.DELETE_CLIENT, (client_id,))
+                        cursor.execute(Queries.DELETE_CLIENT, {"id": client_id})
                         conn.commit()
                         QMessageBox.information(self, "Успех", "Клиент успешно удален")
                         self.load_data()
             except psycopg2.Error as e:
-                QMessageBox.critical(self, "Ошибка", f"Не удалось удалить клиента:\n{str(e)}")
+                QMessageBox.critical(
+                    self,
+                    "Ошибка",
+                    f"Не удалось удалить клиента:\n{str(e)}"
+                )
 
     def show_client_documents(self):
         client_id = self.get_selected_client_id()
-        if not client_id:
+        if client_id is None:
+            QMessageBox.warning(self, "Внимание", "Выберите клиента для просмотра документов")
             return
-        # TODO: Implement documents dialog
-        QMessageBox.information(self, "Информация", "Просмотр документов клиента")
+            
+        selected_row = self.table.selectedItems()[0].row()
+        client_name = f"{self.table.item(selected_row, 1).text()} {self.table.item(selected_row, 2).text()}"
+        
+        dialog = DocumentsDialog(self, client_id, client_name)
+        dialog.exec_()
 
     def show_client_deposits(self):
         client_id = self.get_selected_client_id()
-        if not client_id:
+        if client_id is None:
+            QMessageBox.warning(self, "Внимание", "Выберите клиента для просмотра вкладов")
             return
-        # TODO: Implement deposits dialog
-        QMessageBox.information(self, "Информация", "Просмотр вкладов клиента") 
+            
+        selected_row = self.table.selectedItems()[0].row()
+        client_name = f"{self.table.item(selected_row, 1).text()} {self.table.item(selected_row, 2).text()}"
+        
+        dialog = DepositsDialog(self, client_id, client_name)
+        dialog.exec_() 

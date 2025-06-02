@@ -36,17 +36,26 @@ class DocumentsDialog(QDialog):
     def init_ui(self):
         layout = QVBoxLayout(self)
 
-        # Header
+        # Header with client info
         header_layout = QHBoxLayout()
-        header_layout.addWidget(QLabel(f"Документы клиента: {self.client_name}"))
+        header_label = QLabel(f"Документы клиента: {self.client_name}")
+        header_label.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                font-weight: bold;
+                color: #21A038;
+            }
+        """)
+        header_layout.addWidget(header_label)
         header_layout.addStretch()
 
         # Toolbar
         toolbar = QHBoxLayout()
+        
         self.add_btn = QPushButton(QIcon.fromTheme("list-add"), " Добавить")
         self.add_btn.clicked.connect(self.add_document)
         
-        self.edit_btn = QPushButton(QIcon.fromTheme("document-edit"), " Редактировать")
+        self.edit_btn = QPushButton(QIcon.fromTheme("document-edit"), " Изменить")
         self.edit_btn.clicked.connect(self.edit_document)
         self.edit_btn.setEnabled(False)
         
@@ -61,19 +70,16 @@ class DocumentsDialog(QDialog):
 
         # Table
         self.table = QTableWidget()
-        self.table.setColumnCount(6)
+        self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels([
-            "ID", "Номер паспорта", "Дата рождения", "Пол",
-            "Дата договора", "Статус"
+            "ID", "Тип", "Номер", "Дата выдачи"
         ])
         
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(4, QHeaderView.Stretch)
-        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
         
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -82,7 +88,6 @@ class DocumentsDialog(QDialog):
         self.table.verticalHeader().setVisible(False)
         
         self.table.itemSelectionChanged.connect(self.on_selection_changed)
-        self.table.doubleClicked.connect(self.edit_document_on_double_click)
 
         # Close button
         button_box = QHBoxLayout()
@@ -100,9 +105,12 @@ class DocumentsDialog(QDialog):
         try:
             with self.db.get_connection() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute(Queries.GET_CLIENT_DOCUMENTS, (self.client_id,))
+                    cursor.execute(
+                        Queries.GET_CLIENT_DOCUMENTS,
+                        {"client_id": self.client_id}
+                    )
                     documents = cursor.fetchall()
-
+                    
                     self.table.setRowCount(len(documents))
                     for row, doc in enumerate(documents):
                         # ID
@@ -110,32 +118,19 @@ class DocumentsDialog(QDialog):
                         id_item.setTextAlignment(Qt.AlignCenter)
                         self.table.setItem(row, 0, id_item)
                         
-                        # Passport
+                        # Type
                         self.table.setItem(row, 1, QTableWidgetItem(doc[1]))
                         
-                        # Birth Date
-                        birth_date = doc[2].strftime("%d.%m.%Y")
-                        birth_date_item = QTableWidgetItem(birth_date)
-                        birth_date_item.setTextAlignment(Qt.AlignCenter)
-                        self.table.setItem(row, 2, birth_date_item)
+                        # Number
+                        number_item = QTableWidgetItem(doc[2])
+                        number_item.setTextAlignment(Qt.AlignCenter)
+                        self.table.setItem(row, 2, number_item)
                         
-                        # Gender
-                        gender_item = QTableWidgetItem(doc[3])
-                        gender_item.setTextAlignment(Qt.AlignCenter)
-                        self.table.setItem(row, 3, gender_item)
+                        # Issue Date
+                        date_item = QTableWidgetItem(doc[3].strftime("%d.%m.%Y"))
+                        date_item.setTextAlignment(Qt.AlignCenter)
+                        self.table.setItem(row, 3, date_item)
                         
-                        # Agreement Date
-                        agreement_date = doc[4].strftime("%d.%m.%Y")
-                        agreement_date_item = QTableWidgetItem(agreement_date)
-                        agreement_date_item.setTextAlignment(Qt.AlignCenter)
-                        self.table.setItem(row, 4, agreement_date_item)
-                        
-                        # Status
-                        status_text = "Активен" if doc[6] == 'active' else "Не активен"
-                        status_item = QTableWidgetItem(status_text)
-                        status_item.setTextAlignment(Qt.AlignCenter)
-                        self.table.setItem(row, 5, status_item)
-
         except psycopg2.Error as e:
             QMessageBox.critical(
                 self,
@@ -175,53 +170,55 @@ class DocumentsDialog(QDialog):
                     f"Не удалось добавить документ:\n{str(e)}"
                 )
 
-    def edit_document_on_double_click(self, index):
-        if self.edit_btn.isEnabled():
-            self.edit_document()
-
     def edit_document(self):
         document_id = self.get_selected_document_id()
-        if not document_id:
+        if document_id is None:
+            QMessageBox.warning(self, "Внимание", "Выберите документ для редактирования")
             return
-
-        dialog = DocumentDialog(self, document_id=document_id, client_id=self.client_id)
+            
+        dialog = DocumentDialog(self, document_id=document_id)
         if dialog.exec_() == QDialog.Accepted:
             try:
                 with self.db.get_connection() as conn:
                     with conn.cursor() as cursor:
                         data = dialog.get_data()
+                        data["id"] = document_id
                         cursor.execute(
                             Queries.UPDATE_DOCUMENT,
-                            (*data[:-1], document_id)  # Exclude client_id from update
+                            data
                         )
                         conn.commit()
-                        QMessageBox.information(self, "Успех", "Документ успешно обновлен")
+                        QMessageBox.information(self, "Успех", "Данные документа обновлены")
                         self.load_data()
             except psycopg2.Error as e:
                 QMessageBox.critical(
                     self,
                     "Ошибка",
-                    f"Не удалось обновить документ:\n{str(e)}"
+                    f"Не удалось обновить данные документа:\n{str(e)}"
                 )
 
     def delete_document(self):
         document_id = self.get_selected_document_id()
-        if not document_id:
+        if document_id is None:
+            QMessageBox.warning(self, "Внимание", "Выберите документ для удаления")
             return
-
+            
         reply = QMessageBox.question(
             self,
-            "Подтверждение удаления",
+            "Подтверждение",
             "Вы уверены, что хотите удалить этот документ?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
-
+        
         if reply == QMessageBox.Yes:
             try:
                 with self.db.get_connection() as conn:
                     with conn.cursor() as cursor:
-                        cursor.execute(Queries.DELETE_DOCUMENT, (document_id,))
+                        cursor.execute(
+                            Queries.DELETE_DOCUMENT,
+                            {"id": document_id}
+                        )
                         conn.commit()
                         QMessageBox.information(self, "Успех", "Документ успешно удален")
                         self.load_data()

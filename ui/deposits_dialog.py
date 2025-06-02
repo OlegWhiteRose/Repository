@@ -37,17 +37,26 @@ class DepositsDialog(QDialog):
     def init_ui(self):
         layout = QVBoxLayout(self)
 
-        # Header
+        # Header with client info
         header_layout = QHBoxLayout()
-        header_layout.addWidget(QLabel(f"Вклады клиента: {self.client_name}"))
+        header_label = QLabel(f"Вклады клиента: {self.client_name}")
+        header_label.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                font-weight: bold;
+                color: #21A038;
+            }
+        """)
+        header_layout.addWidget(header_label)
         header_layout.addStretch()
 
         # Toolbar
         toolbar = QHBoxLayout()
-        self.add_btn = QPushButton(QIcon.fromTheme("list-add"), " Открыть вклад")
+        
+        self.add_btn = QPushButton(QIcon.fromTheme("list-add"), " Добавить")
         self.add_btn.clicked.connect(self.add_deposit)
         
-        self.edit_btn = QPushButton(QIcon.fromTheme("document-edit"), " Редактировать")
+        self.edit_btn = QPushButton(QIcon.fromTheme("document-edit"), " Изменить")
         self.edit_btn.clicked.connect(self.edit_deposit)
         self.edit_btn.setEnabled(False)
         
@@ -55,16 +64,16 @@ class DepositsDialog(QDialog):
         self.close_btn.clicked.connect(self.close_deposit)
         self.close_btn.setEnabled(False)
         
-        self.early_close_btn = QPushButton(QIcon.fromTheme("process-stop"), " Досрочное закрытие")
+        self.early_close_btn = QPushButton(QIcon.fromTheme("process-stop"), " Досрочно закрыть")
         self.early_close_btn.clicked.connect(self.early_close_deposit)
         self.early_close_btn.setEnabled(False)
         
         self.add_money_btn = QPushButton(QIcon.fromTheme("go-up"), " Пополнить")
-        self.add_money_btn.clicked.connect(self.add_money)
+        self.add_money_btn.clicked.connect(self.add_money_to_deposit)
         self.add_money_btn.setEnabled(False)
         
-        self.transactions_btn = QPushButton(QIcon.fromTheme("view-list-text"), " История операций")
-        self.transactions_btn.clicked.connect(self.show_transactions)
+        self.transactions_btn = QPushButton(QIcon.fromTheme("view-list-text"), " Транзакции")
+        self.transactions_btn.clicked.connect(self.show_deposit_transactions)
         self.transactions_btn.setEnabled(False)
 
         toolbar.addWidget(self.add_btn)
@@ -100,7 +109,6 @@ class DepositsDialog(QDialog):
         self.table.verticalHeader().setVisible(False)
         
         self.table.itemSelectionChanged.connect(self.on_selection_changed)
-        self.table.doubleClicked.connect(self.edit_deposit_on_double_click)
 
         # Close button
         button_box = QHBoxLayout()
@@ -118,9 +126,12 @@ class DepositsDialog(QDialog):
         try:
             with self.db.get_connection() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute(Queries.GET_CLIENT_DEPOSITS, (self.client_id,))
+                    cursor.execute(
+                        Queries.GET_CLIENT_DEPOSITS,
+                        {"client_id": self.client_id}
+                    )
                     deposits = cursor.fetchall()
-
+                    
                     self.table.setRowCount(len(deposits))
                     for row, dep in enumerate(deposits):
                         # ID
@@ -129,24 +140,25 @@ class DepositsDialog(QDialog):
                         self.table.setItem(row, 0, id_item)
                         
                         # Amount
-                        amount_item = QTableWidgetItem(f"{float(dep[1]):,.2f} ₽")
+                        amount_item = QTableWidgetItem(f"{dep[1]:,.2f}")
                         amount_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                         self.table.setItem(row, 1, amount_item)
                         
                         # Open Date
-                        open_date = dep[3].strftime("%d.%m.%Y")
-                        open_date_item = QTableWidgetItem(open_date)
+                        open_date_item = QTableWidgetItem(dep[2].strftime("%d.%m.%Y"))
                         open_date_item.setTextAlignment(Qt.AlignCenter)
                         self.table.setItem(row, 2, open_date_item)
                         
                         # Close Date
-                        close_date = dep[2].strftime("%d.%m.%Y") if dep[2] else "-"
-                        close_date_item = QTableWidgetItem(close_date)
+                        close_date = dep[3]
+                        close_date_item = QTableWidgetItem(
+                            close_date.strftime("%d.%m.%Y") if close_date else "-"
+                        )
                         close_date_item.setTextAlignment(Qt.AlignCenter)
                         self.table.setItem(row, 3, close_date_item)
                         
                         # Interest Rate
-                        rate_item = QTableWidgetItem(f"{float(dep[4]):.2f}%")
+                        rate_item = QTableWidgetItem(f"{dep[4]:.2f}%")
                         rate_item.setTextAlignment(Qt.AlignCenter)
                         self.table.setItem(row, 4, rate_item)
                         
@@ -207,116 +219,72 @@ class DepositsDialog(QDialog):
             try:
                 with self.db.get_connection() as conn:
                     with conn.cursor() as cursor:
-                        # Start transaction
-                        cursor.execute("BEGIN")
-                        try:
-                            # Add deposit
-                            cursor.execute(
-                                Queries.ADD_DEPOSIT,
-                                dialog.get_data()
-                            )
-                            deposit_id = cursor.fetchone()[0]
-
-                            # Add opening transaction
-                            cursor.execute(
-                                Queries.ADD_TRANSACTION,
-                                (deposit_id, dialog.amount_input.value(), datetime.now(), "opening")
-                            )
-                            
-                            conn.commit()
-                            QMessageBox.information(self, "Успех", "Вклад успешно открыт")
-                            self.load_data()
-                        except Exception as e:
-                            conn.rollback()
-                            raise e
-            except psycopg2.Error as e:
-                QMessageBox.critical(
-                    self,
-                    "Ошибка",
-                    f"Не удалось открыть вклад:\n{str(e)}"
-                )
-
-    def edit_deposit_on_double_click(self, index):
-        if self.edit_btn.isEnabled():
-            self.edit_deposit()
-
-    def edit_deposit(self):
-        deposit_id = self.get_selected_deposit_id()
-        if not deposit_id:
-            return
-
-        dialog = DepositDialog(self, deposit_id=deposit_id, client_id=self.client_id)
-        if dialog.exec_() == QDialog.Accepted:
-            try:
-                with self.db.get_connection() as conn:
-                    with conn.cursor() as cursor:
-                        data = dialog.get_data()
                         cursor.execute(
-                            Queries.UPDATE_DEPOSIT,
-                            (*data[:-1], deposit_id)  # Exclude client_id from update
+                            Queries.ADD_DEPOSIT,
+                            dialog.get_data()
                         )
                         conn.commit()
-                        QMessageBox.information(self, "Успех", "Вклад успешно обновлен")
+                        QMessageBox.information(self, "Успех", "Вклад успешно создан")
                         self.load_data()
             except psycopg2.Error as e:
                 QMessageBox.critical(
                     self,
                     "Ошибка",
-                    f"Не удалось обновить вклад:\n{str(e)}"
+                    f"Не удалось создать вклад:\n{str(e)}"
+                )
+
+    def edit_deposit(self):
+        deposit_id = self.get_selected_deposit_id()
+        if deposit_id is None:
+            QMessageBox.warning(self, "Внимание", "Выберите вклад для редактирования")
+            return
+            
+        dialog = DepositDialog(self, deposit_id=deposit_id)
+        if dialog.exec_() == QDialog.Accepted:
+            try:
+                with self.db.get_connection() as conn:
+                    with conn.cursor() as cursor:
+                        data = dialog.get_data()
+                        data["id"] = deposit_id
+                        cursor.execute(
+                            Queries.UPDATE_DEPOSIT,
+                            data
+                        )
+                        conn.commit()
+                        QMessageBox.information(self, "Успех", "Данные вклада обновлены")
+                        self.load_data()
+            except psycopg2.Error as e:
+                QMessageBox.critical(
+                    self,
+                    "Ошибка",
+                    f"Не удалось обновить данные вклада:\n{str(e)}"
                 )
 
     def close_deposit(self):
-        self._close_deposit("closed")
-
-    def early_close_deposit(self):
-        self._close_deposit("closed early")
-
-    def _close_deposit(self, status):
         deposit_id = self.get_selected_deposit_id()
-        if not deposit_id:
+        if deposit_id is None:
+            QMessageBox.warning(self, "Внимание", "Выберите вклад для закрытия")
             return
-
+            
         reply = QMessageBox.question(
             self,
-            "Подтверждение закрытия",
-            f"Вы уверены, что хотите {'досрочно ' if status == 'closed early' else ''}закрыть этот вклад?",
+            "Подтверждение",
+            "Вы уверены, что хотите закрыть этот вклад?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
-
+        
         if reply == QMessageBox.Yes:
             try:
                 with self.db.get_connection() as conn:
                     with conn.cursor() as cursor:
-                        # Get current amount
-                        cursor.execute(Queries.GET_DEPOSIT_BY_ID, (deposit_id,))
-                        deposit = cursor.fetchone()
-                        if not deposit:
-                            raise Exception("Вклад не найден")
-                        
-                        amount = float(deposit[1])
-                        
-                        # Start transaction
-                        cursor.execute("BEGIN")
-                        try:
-                            # Update deposit status
-                            cursor.execute(
-                                Queries.CLOSE_DEPOSIT,
-                                (status, datetime.now(), deposit_id)
-                            )
-
-                            # Add closing transaction
-                            cursor.execute(
-                                Queries.ADD_TRANSACTION,
-                                (deposit_id, amount, datetime.now(), "early closing" if status == "closed early" else "closing")
-                            )
-                            
-                            conn.commit()
-                            QMessageBox.information(self, "Успех", "Вклад успешно закрыт")
-                            self.load_data()
-                        except Exception as e:
-                            conn.rollback()
-                            raise e
+                        cursor.execute(
+                            Queries.CLOSE_DEPOSIT,
+                            {"id": deposit_id, "status": "closed"}
+                        )
+                        conn.commit()
+                        QMessageBox.information(self, "Успех", "Вклад успешно закрыт")
+                        self.load_data()
             except psycopg2.Error as e:
                 QMessageBox.critical(
                     self,
@@ -324,39 +292,58 @@ class DepositsDialog(QDialog):
                     f"Не удалось закрыть вклад:\n{str(e)}"
                 )
 
-    def add_money(self):
+    def early_close_deposit(self):
         deposit_id = self.get_selected_deposit_id()
-        if not deposit_id:
+        if deposit_id is None:
+            QMessageBox.warning(self, "Внимание", "Выберите вклад для досрочного закрытия")
             return
+            
+        reply = QMessageBox.question(
+            self,
+            "Подтверждение",
+            "Вы уверены, что хотите досрочно закрыть этот вклад?\n"
+            "Это может привести к потере процентов.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            try:
+                with self.db.get_connection() as conn:
+                    with conn.cursor() as cursor:
+                        cursor.execute(
+                            Queries.CLOSE_DEPOSIT,
+                            {"id": deposit_id, "status": "closed early"}
+                        )
+                        conn.commit()
+                        QMessageBox.information(self, "Успех", "Вклад успешно закрыт досрочно")
+                        self.load_data()
+            except psycopg2.Error as e:
+                QMessageBox.critical(
+                    self,
+                    "Ошибка",
+                    f"Не удалось закрыть вклад досрочно:\n{str(e)}"
+                )
 
+    def add_money_to_deposit(self):
+        deposit_id = self.get_selected_deposit_id()
+        if deposit_id is None:
+            QMessageBox.warning(self, "Внимание", "Выберите вклад для пополнения")
+            return
+            
         dialog = TransactionDialog(self, deposit_id=deposit_id)
         if dialog.exec_() == QDialog.Accepted:
             try:
                 with self.db.get_connection() as conn:
                     with conn.cursor() as cursor:
-                        # Start transaction
-                        cursor.execute("BEGIN")
-                        try:
-                            amount = dialog.get_amount()
-                            
-                            # Update deposit amount
-                            cursor.execute(
-                                Queries.UPDATE_DEPOSIT_AMOUNT,
-                                (amount, deposit_id)
-                            )
-
-                            # Add transaction
-                            cursor.execute(
-                                Queries.ADD_TRANSACTION,
-                                (deposit_id, amount, datetime.now(), "addition")
-                            )
-                            
-                            conn.commit()
-                            QMessageBox.information(self, "Успех", "Вклад успешно пополнен")
-                            self.load_data()
-                        except Exception as e:
-                            conn.rollback()
-                            raise e
+                        amount = dialog.get_amount()
+                        cursor.execute(
+                            Queries.UPDATE_DEPOSIT_AMOUNT,
+                            (amount, deposit_id)
+                        )
+                        conn.commit()
+                        QMessageBox.information(self, "Успех", "Вклад успешно пополнен")
+                        self.load_data()
             except psycopg2.Error as e:
                 QMessageBox.critical(
                     self,
@@ -364,9 +351,14 @@ class DepositsDialog(QDialog):
                     f"Не удалось пополнить вклад:\n{str(e)}"
                 )
 
-    def show_transactions(self):
+    def show_deposit_transactions(self):
         deposit_id = self.get_selected_deposit_id()
-        if not deposit_id:
+        if deposit_id is None:
+            QMessageBox.warning(self, "Внимание", "Выберите вклад для просмотра транзакций")
             return
-        # TODO: Implement transactions dialog
-        QMessageBox.information(self, "Информация", "История операций по вкладу") 
+            
+        selected_row = self.table.selectedItems()[0].row()
+        deposit_info = f"Вклад #{deposit_id}"
+        
+        dialog = TransactionDialog(self, deposit_id, deposit_info)
+        dialog.exec_() 

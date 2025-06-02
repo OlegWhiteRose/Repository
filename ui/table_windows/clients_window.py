@@ -71,9 +71,10 @@ class ClientDialog(QDialog):
         }
 
 class ClientsWindow(BaseTableWindow):
-    def __init__(self, parent=None, user_role="user"):
+    def __init__(self, parent=None, user_role="user", specific_client_id=None):
         super().__init__(parent, title="Клиенты", user_role=user_role)
         self.db = Database()
+        self.specific_client_id = specific_client_id
         self.setup_search_panel()
         self.setup_table()
         self.setup_navigation()
@@ -81,6 +82,10 @@ class ClientsWindow(BaseTableWindow):
         
     def setup_search_panel(self):
         """Настраивает панель поиска"""
+        # Если указан конкретный клиент, не показываем панель поиска
+        if self.specific_client_id:
+            return
+
         search_group = QGroupBox("Поиск")
         search_layout = QFormLayout()
         
@@ -91,7 +96,6 @@ class ClientsWindow(BaseTableWindow):
         self.search_phone = QLineEdit()
         self.search_phone.setInputMask("+7 (999) 999-99-99;_")
         self.search_phone.setPlaceholderText("+7 (___) ___-__-__")
-        # Сохраняем начальное значение маски
         self.initial_phone_mask = self.search_phone.text()
         self.search_phone.textChanged.connect(self.refresh_table)
         
@@ -99,7 +103,7 @@ class ClientsWindow(BaseTableWindow):
         search_layout.addRow("Телефон:", self.search_phone)
         
         search_group.setLayout(search_layout)
-        self.main_layout.insertWidget(0, search_group)
+        self.main_layout.insertWidget(1, search_group)
         
     def setup_table(self):
         """Настраивает структуру таблицы"""
@@ -132,31 +136,35 @@ class ClientsWindow(BaseTableWindow):
     def refresh_table(self):
         """Обновляет данные в таблице"""
         try:
+            # Базовый запрос
             query = """
-                SELECT c.id, c.first_name, c.last_name, c.phone
-                FROM Client c
-                WHERE (LOWER(c.last_name) LIKE LOWER(%s) OR %s = '')
+                SELECT id, first_name, last_name, phone
+                FROM Client
+                WHERE 1=1
             """
-            
-            params = [
-                f"%{self.search_last_name.text()}%" if self.search_last_name.text() else "",
-                self.search_last_name.text()
-            ]
+            params = []
 
-            # Применяем фильтр по телефону только если текст отличается от начальной маски
-            current_phone = self.search_phone.text()
-            if current_phone != self.initial_phone_mask:
-                # Извлекаем только введенные цифры из текущего значения
-                current_digits = ''.join(c for c in current_phone if c.isdigit())
-                # Формируем шаблон для поиска
-                search_pattern = '%'
-                for digit in current_digits:
-                    search_pattern += f'[^0-9]*{digit}'
-                search_pattern += '%'
-                query += " AND c.phone ~ %s"
-                params.append(search_pattern)
-            
-            query += " ORDER BY c.last_name, c.first_name"
+            # Если указан конкретный клиент, показываем только его
+            if self.specific_client_id:
+                query += " AND id = %s"
+                params.append(self.specific_client_id)
+            else:
+                # Иначе применяем фильтры поиска
+                if self.search_last_name.text():
+                    query += " AND LOWER(last_name) LIKE LOWER(%s)"
+                    params.append(f"%{self.search_last_name.text()}%")
+
+                if self.search_phone.text() != self.initial_phone_mask:
+                    current_phone = ''.join(c for c in self.search_phone.text() if c.isdigit())
+                    if current_phone:
+                        query += " AND phone ~ %s"
+                        search_pattern = '%'
+                        for digit in current_phone:
+                            search_pattern += f'[^0-9]*{digit}'
+                        search_pattern += '%'
+                        params.append(search_pattern)
+
+            query += " ORDER BY last_name, first_name"
             
             results = self.db.execute_query(query, params=params, fetch_all=True)
             
@@ -164,7 +172,7 @@ class ClientsWindow(BaseTableWindow):
             for row_num, row_data in enumerate(results):
                 self.table.insertRow(row_num)
                 for col_num, cell_data in enumerate(row_data):
-                    item = QTableWidgetItem(str(cell_data))
+                    item = QTableWidgetItem(str(cell_data) if cell_data is not None else "")
                     if col_num == 0:  # ID column
                         item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                     self.table.setItem(row_num, col_num, item)

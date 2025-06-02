@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (
     QLabel
 )
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QPalette, QColor
 
 from database.db import Database
 from .main_window import MainWindow
@@ -19,6 +19,7 @@ class LoginWindow(QMainWindow):
         super().__init__()
         self.db = Database()
         self.setup_ui()
+        self.apply_sberbank_style()
         
     def setup_ui(self):
         """Настраивает пользовательский интерфейс"""
@@ -31,9 +32,10 @@ class LoginWindow(QMainWindow):
         main_layout = QVBoxLayout(central_widget)
         
         # Заголовок
-        title_label = QLabel("Банковская система управления вкладами")
-        title_label.setFont(QFont("Arial", 12, QFont.Bold))
+        title_label = QLabel("АС Учета вкладов в Сбербанке")
+        title_label.setFont(QFont("Arial", 14, QFont.Bold))
         title_label.setAlignment(Qt.AlignCenter)
+        title_label.setStyleSheet("color: #1E4620; margin: 10px;")  # Темно-зеленый цвет Сбербанка
         main_layout.addWidget(title_label)
         
         # Форма входа
@@ -43,6 +45,21 @@ class LoginWindow(QMainWindow):
         self.password_edit = QLineEdit()
         self.password_edit.setEchoMode(QLineEdit.Password)
         
+        # Стилизация полей ввода
+        input_style = """
+            QLineEdit {
+                padding: 8px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                background: white;
+            }
+            QLineEdit:focus {
+                border: 1px solid #21A038;
+            }
+        """
+        self.username_edit.setStyleSheet(input_style)
+        self.password_edit.setStyleSheet(input_style)
+        
         form_layout.addRow("Логин:", self.username_edit)
         form_layout.addRow("Пароль:", self.password_edit)
         
@@ -50,13 +67,42 @@ class LoginWindow(QMainWindow):
         
         # Кнопка входа
         login_button = QPushButton("Войти")
+        login_button.setStyleSheet("""
+            QPushButton {
+                background-color: #21A038;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1E4620;
+            }
+            QPushButton:pressed {
+                background-color: #167025;
+            }
+        """)
         login_button.clicked.connect(self.login)
         main_layout.addWidget(login_button)
         
-        # Версия
-        version_label = QLabel("Версия 1.0")
-        version_label.setAlignment(Qt.AlignRight)
-        main_layout.addWidget(version_label)
+        # Добавляем отступы
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(15)
+        
+    def apply_sberbank_style(self):
+        """Применяет стиль Сбербанка к окну"""
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: white;
+            }
+            QLabel {
+                color: #1E4620;
+            }
+            QFormLayout {
+                spacing: 10px;
+            }
+        """)
         
     def login(self):
         """Обработка входа в систему"""

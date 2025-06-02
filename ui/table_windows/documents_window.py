@@ -117,7 +117,7 @@ class DocumentsWindow(BaseTableWindow):
         if current_row >= 0:
             try:
                 query = """
-                    SELECT c.id, c.first_name, c.last_name
+                    SELECT c.id, c.first_name, c.last_name, c.phone
                     FROM Document d
                     JOIN Client c ON d.client_id = c.id
                     WHERE d.id = %s
@@ -132,12 +132,11 @@ class DocumentsWindow(BaseTableWindow):
                     from .clients_window import ClientsWindow
                     clients_window = ClientsWindow(self)
                     clients_window.show()
-                    # Найти и выделить нужного клиента в таблице
-                    for row in range(clients_window.table.rowCount()):
-                        if clients_window.table.item(row, 0).text() == str(client[0]):
-                            clients_window.table.selectRow(row)
-                            break
-                            
+                    
+                    # Устанавливаем фильтр для отображения только нужного клиента
+                    clients_window.specific_client_id = client[0]
+                    clients_window.refresh_table()
+                    
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось открыть окно клиента: {str(e)}")
         

@@ -35,47 +35,20 @@ class EmployeeDialog(QDialog):
         # Создаем поля ввода
         self.first_name_edit = QLineEdit()
         self.last_name_edit = QLineEdit()
-        self.position_combo = QComboBox()
-        self.position_combo.addItems([
-            "Менеджер",
-            "Старший менеджер",
-            "Консультант",
-            "Кассир",
-            "Руководитель отдела",
-            "Администратор"
-        ])
-        
-        self.hire_date_edit = QDateEdit()
-        self.hire_date_edit.setCalendarPopup(True)
-        self.hire_date_edit.setDate(QDate.currentDate())
-        
         self.phone_edit = QLineEdit()
-        self.phone_edit.setPlaceholderText("+7 (XXX) XXX-XX-XX")
-        
-        self.email_edit = QLineEdit()
-        self.email_edit.setPlaceholderText("example@bank.com")
-        
-        self.status_combo = QComboBox()
-        self.status_combo.addItems(["active", "vacation", "sick leave", "fired"])
+        self.phone_edit.setInputMask("+7 (999) 999-99-99")
+        self.phone_edit.setPlaceholderText("+7 (___) ___-__-__")
         
         # Добавляем поля в форму
         form_layout.addRow("Имя*:", self.first_name_edit)
         form_layout.addRow("Фамилия*:", self.last_name_edit)
-        form_layout.addRow("Должность*:", self.position_combo)
-        form_layout.addRow("Дата приема*:", self.hire_date_edit)
         form_layout.addRow("Телефон*:", self.phone_edit)
-        form_layout.addRow("Email:", self.email_edit)
-        form_layout.addRow("Статус*:", self.status_combo)
         
         # Если редактируем существующего сотрудника
         if self.employee_data:
             self.first_name_edit.setText(self.employee_data["first_name"])
             self.last_name_edit.setText(self.employee_data["last_name"])
-            self.position_combo.setCurrentText(self.employee_data["position"])
-            self.hire_date_edit.setDate(QDate.fromString(self.employee_data["hire_date"], Qt.ISODate))
             self.phone_edit.setText(self.employee_data["phone"])
-            self.email_edit.setText(self.employee_data["email"])
-            self.status_combo.setCurrentText(self.employee_data["status"])
             
         # Кнопки
         buttons_layout = QVBoxLayout()
@@ -97,17 +70,14 @@ class EmployeeDialog(QDialog):
         return {
             "first_name": self.first_name_edit.text(),
             "last_name": self.last_name_edit.text(),
-            "position": self.position_combo.currentText(),
-            "hire_date": self.hire_date_edit.date().toString(Qt.ISODate),
-            "phone": self.phone_edit.text(),
-            "email": self.email_edit.text(),
-            "status": self.status_combo.currentText()
+            "phone": self.phone_edit.text()
         }
 
 class EmployeesWindow(BaseTableWindow):
-    def __init__(self, parent=None, user_role="user"):
+    def __init__(self, parent=None, user_role="user", specific_id=None):
         super().__init__(parent, title="Сотрудники", user_role=user_role)
         self.db = Database()
+        self.specific_id = specific_id
         self.setup_search_panel()
         self.setup_table()
         self.setup_navigation()
@@ -115,6 +85,10 @@ class EmployeesWindow(BaseTableWindow):
         
     def setup_search_panel(self):
         """Настраивает панель поиска"""
+        # Если указан конкретный сотрудник, не показываем панель поиска
+        if self.specific_id:
+            return
+            
         search_group = QGroupBox("Поиск")
         search_layout = QFormLayout()
         
@@ -155,11 +129,13 @@ class EmployeesWindow(BaseTableWindow):
                 employee_name = f"{self.table.item(current_row, 1).text()} {self.table.item(current_row, 2).text()}"
                 
                 from .reports_window import ReportsWindow
-                reports_window = ReportsWindow(self)
+                reports_window = ReportsWindow(
+                    self,
+                    employee_id=employee_id,
+                    employee_name=employee_name,
+                    user_role=self.user_role
+                )
                 reports_window.show()
-                
-                # Установить фильтр по фамилии сотрудника
-                reports_window.search_employee.setText(self.table.item(current_row, 2).text())
                 
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось открыть окно отчетов: {str(e)}")
@@ -170,26 +146,33 @@ class EmployeesWindow(BaseTableWindow):
             query = """
                 SELECT e.id, e.first_name, e.last_name, e.phone
                 FROM Employee e
-                WHERE (LOWER(e.last_name) LIKE LOWER(%s) OR %s = '')
+                WHERE 1=1
             """
             
-            params = [
-                f"%{self.search_last_name.text()}%" if self.search_last_name.text() else "",
-                self.search_last_name.text()
-            ]
+            params = []
+            
+            # Фильтр по конкретному сотруднику
+            if self.specific_id:
+                query += " AND e.id = %s"
+                params.append(self.specific_id)
+            else:
+                # Применяем остальные фильтры только если не ищем конкретного сотрудника
+                if self.search_last_name.text():
+                    query += " AND LOWER(e.last_name) LIKE LOWER(%s)"
+                    params.append(f"%{self.search_last_name.text()}%")
 
-            # Применяем фильтр по телефону только если текст отличается от начальной маски
-            current_phone = self.search_phone.text()
-            if current_phone != self.initial_phone_mask:
-                # Извлекаем только введенные цифры из текущего значения
-                current_digits = ''.join(c for c in current_phone if c.isdigit())
-                # Формируем шаблон для поиска
-                search_pattern = '%'
-                for digit in current_digits:
-                    search_pattern += f'[^0-9]*{digit}'
-                search_pattern += '%'
-                query += " AND e.phone ~ %s"
-                params.append(search_pattern)
+                # Применяем фильтр по телефону только если текст отличается от начальной маски
+                current_phone = self.search_phone.text()
+                if current_phone != self.initial_phone_mask:
+                    # Извлекаем только введенные цифры из текущего значения
+                    current_digits = ''.join(c for c in current_phone if c.isdigit())
+                    # Формируем шаблон для поиска
+                    search_pattern = '%'
+                    for digit in current_digits:
+                        search_pattern += f'[^0-9]*{digit}'
+                    search_pattern += '%'
+                    query += " AND e.phone ~ %s"
+                    params.append(search_pattern)
             
             query += " ORDER BY e.last_name, e.first_name"
             
@@ -217,10 +200,9 @@ class EmployeesWindow(BaseTableWindow):
             try:
                 query = """
                     INSERT INTO Employee (
-                        first_name, last_name, position,
-                        hire_date, phone, email, status
+                        first_name, last_name, phone
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s)
                     RETURNING id
                 """
                 self.db.execute_query(
@@ -228,11 +210,7 @@ class EmployeesWindow(BaseTableWindow):
                     params=(
                         data["first_name"],
                         data["last_name"],
-                        data["position"],
-                        data["hire_date"],
-                        data["phone"],
-                        data["email"],
-                        data["status"]
+                        data["phone"]
                     ),
                     commit=True
                 )
@@ -252,11 +230,7 @@ class EmployeesWindow(BaseTableWindow):
             "id": self.table.item(current_row, 0).text(),
             "first_name": self.table.item(current_row, 1).text(),
             "last_name": self.table.item(current_row, 2).text(),
-            "position": self.table.item(current_row, 3).text(),
-            "hire_date": self.table.item(current_row, 4).text(),
-            "phone": self.table.item(current_row, 5).text(),
-            "email": self.table.item(current_row, 6).text(),
-            "status": self.table.item(current_row, 7).text()
+            "phone": self.table.item(current_row, 3).text()
         }
         
         dialog = EmployeeDialog(self, employee_data)
@@ -267,11 +241,7 @@ class EmployeesWindow(BaseTableWindow):
                     UPDATE Employee
                     SET first_name = %s,
                         last_name = %s,
-                        position = %s,
-                        hire_date = %s,
-                        phone = %s,
-                        email = %s,
-                        status = %s
+                        phone = %s
                     WHERE id = %s
                 """
                 self.db.execute_query(
@@ -279,11 +249,7 @@ class EmployeesWindow(BaseTableWindow):
                     params=(
                         data["first_name"],
                         data["last_name"],
-                        data["position"],
-                        data["hire_date"],
                         data["phone"],
-                        data["email"],
-                        data["status"],
                         employee_data["id"]
                     ),
                     commit=True
@@ -321,72 +287,6 @@ class EmployeesWindow(BaseTableWindow):
                 QMessageBox.critical(self, "Ошибка", f"Не удалось удалить сотрудника: {str(e)}")
                 
     def show_related_records(self, row):
-        """Показывает связанные записи для выбранного сотрудника"""
-        if row < 0:
-            return
-            
-        employee_id = self.table.item(row, 0).text()
-        employee_name = f"{self.table.item(row, 1).text()} {self.table.item(row, 2).text()}"
-        
-        try:
-            # Получаем отчеты сотрудника
-            query = """
-                SELECT r.id, r.creation_date, r.content,
-                       t.type as transaction_type, t.amount
-                FROM Report r
-                JOIN Transaction t ON r.transaction_id = t.id
-                WHERE r.employee_id = %s
-                ORDER BY r.creation_date DESC
-            """
-            reports = self.db.execute_query(query, params=(employee_id,), fetch_all=True)
-            
-            if not reports:
-                QMessageBox.information(
-                    self,
-                    "Информация",
-                    f"У сотрудника {employee_name} нет отчетов"
-                )
-                return
-                
-            # Создаем диалог для отображения отчетов
-            dialog = QDialog(self)
-            dialog.setWindowTitle(f"Отчеты сотрудника: {employee_name}")
-            dialog.setModal(True)
-            dialog.setMinimumSize(600, 400)
-            
-            layout = QVBoxLayout(dialog)
-            
-            # Создаем таблицу отчетов
-            table = QTableWidget()
-            table.setColumnCount(5)
-            table.setHorizontalHeaderLabels([
-                "ID", "Дата", "Содержание",
-                "Тип операции", "Сумма"
-            ])
-            
-            for row_num, report in enumerate(reports):
-                table.insertRow(row_num)
-                for col_num, value in enumerate(report):
-                    if isinstance(value, datetime):
-                        value = value.strftime("%Y-%m-%d %H:%M:%S")
-                    elif isinstance(value, (int, float)):
-                        value = f"{value:.2f}"
-                    item = QTableWidgetItem(str(value))
-                    table.setItem(row_num, col_num, item)
-                    
-            table.resizeColumnsToContents()
-            layout.addWidget(table)
-            
-            # Кнопка закрытия
-            close_button = QPushButton("Закрыть")
-            close_button.clicked.connect(dialog.accept)
-            layout.addWidget(close_button)
-            
-            dialog.exec_()
-            
-        except Exception as e:
-            QMessageBox.critical(
-                self,
-                "Ошибка",
-                f"Не удалось загрузить связанные записи: {str(e)}"
-            ) 
+        """При выделении записи только активируем кнопки навигации"""
+        # Ничего не открываем автоматически, только активируем кнопки
+        pass 

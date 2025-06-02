@@ -11,10 +11,11 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QMenu,
     QHeaderView,
-    QGroupBox
+    QGroupBox,
+    QFrame
 )
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QIcon
+from PyQt5.QtGui import QIcon, QColor, QPalette
 
 class BaseTableWindow(QMainWindow):
     """Базовый класс для окон с таблицами"""
@@ -33,6 +34,23 @@ class BaseTableWindow(QMainWindow):
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.main_layout = QVBoxLayout(self.central_widget)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setSpacing(0)
+        
+        # Создаем навбар
+        self.create_navbar(title)
+        
+        # Создаем контейнер для основного содержимого
+        content_container = QWidget()
+        content_container.setStyleSheet("""
+            QWidget {
+                background-color: white;
+            }
+        """)
+        content_layout = QVBoxLayout(content_container)
+        content_layout.setContentsMargins(20, 20, 20, 20)
+        content_layout.setSpacing(15)  # Отступ между всеми элементами
+        self.main_layout.addWidget(content_container)
         
         # Верхняя панель с кнопкой "Назад" и поиском
         self.create_top_panel()
@@ -46,22 +64,84 @@ class BaseTableWindow(QMainWindow):
         # Панель навигации
         self.create_navigation_panel()
         
+        # Применяем стили
+        self.apply_sberbank_style()
+        
+    def create_navbar(self, title):
+        """Создает навбар в стиле Сбербанка"""
+        navbar = QFrame()
+        navbar.setStyleSheet("""
+            QFrame {
+                background-color: #21A038;
+                min-height: 40px;
+                max-height: 40px;
+            }
+        """)
+        navbar_layout = QHBoxLayout(navbar)
+        navbar_layout.setContentsMargins(20, 0, 20, 0)
+        navbar_layout.setSpacing(10)
+        
+        # Заголовок в навбаре
+        title_label = QLabel(title)
+        title_label.setStyleSheet("""
+            QLabel {
+                color: white;
+                font-size: 14px;
+                font-weight: bold;
+            }
+        """)
+        navbar_layout.addWidget(title_label)
+        navbar_layout.addStretch()
+        
+        self.main_layout.addWidget(navbar)
+        
     def create_top_panel(self):
         """Создает верхнюю панель с кнопкой назад и поиском"""
         top_panel = QHBoxLayout()
+        top_panel.setSpacing(20)  # Отступ между кнопкой назад и поиском
         
         # Кнопка "Назад"
         back_button = QPushButton("← Назад")
         back_button.setFixedWidth(100)
         back_button.clicked.connect(self.close)
+        back_button.setStyleSheet("""
+            QPushButton {
+                background-color: white;
+                color: #21A038;
+                border: 2px solid #21A038;
+                padding: 6px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #21A038;
+                color: white;
+            }
+            QPushButton:pressed {
+                background-color: #1E4620;
+                color: white;
+            }
+        """)
         top_panel.addWidget(back_button)
         
         # Поиск
         search_layout = QHBoxLayout()
+        search_layout.setSpacing(10)
         self.search_label = QLabel("Поиск:")
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Введите текст для поиска...")
         self.search_input.textChanged.connect(self.search_in_table)
+        self.search_input.setStyleSheet("""
+            QLineEdit {
+                padding: 6px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                background: white;
+            }
+            QLineEdit:focus {
+                border: 1px solid #21A038;
+            }
+        """)
         
         search_layout.addWidget(self.search_label)
         search_layout.addWidget(self.search_input)
@@ -76,37 +156,106 @@ class BaseTableWindow(QMainWindow):
         self.table.customContextMenuRequested.connect(self.show_context_menu)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.table.itemSelectionChanged.connect(self.on_selection_changed)
+        
+        # Стилизация таблицы
+        self.table.setStyleSheet("""
+            QTableWidget {
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                background-color: white;
+            }
+            QTableWidget::item {
+                padding: 5px;
+            }
+            QTableWidget::item:selected {
+                background-color: #E7F5E9;
+                color: black;
+            }
+            QHeaderView::section {
+                background-color: #F5F5F5;
+                padding: 5px;
+                border: none;
+                border-bottom: 1px solid #ddd;
+                font-weight: bold;
+            }
+            QHeaderView::section:hover {
+                background-color: #E7F5E9;
+            }
+        """)
+        
         self.main_layout.addWidget(self.table)
         
     def create_bottom_panel(self):
         """Создает нижнюю панель с кнопками действий"""
         bottom_panel = QHBoxLayout()
+        bottom_panel.setSpacing(10)  # Отступ между кнопками
+        
+        button_style = """
+            QPushButton {
+                background-color: white;
+                color: #21A038;
+                border: 2px solid #21A038;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #21A038;
+                color: white;
+            }
+            QPushButton:pressed {
+                background-color: #1E4620;
+                color: white;
+            }
+            QPushButton:disabled {
+                background-color: #F5F5F5;
+                color: #999;
+                border-color: #999;
+            }
+        """
         
         # Кнопки действий только для админа
         if self.user_role == "admin":
             self.add_button = QPushButton("Добавить")
             self.add_button.clicked.connect(self.add_record)
+            self.add_button.setStyleSheet(button_style)
             bottom_panel.addWidget(self.add_button)
             
             self.edit_button = QPushButton("Изменить")
             self.edit_button.clicked.connect(self.edit_record)
             self.edit_button.setEnabled(False)
+            self.edit_button.setStyleSheet(button_style)
             bottom_panel.addWidget(self.edit_button)
             
             self.delete_button = QPushButton("Удалить")
             self.delete_button.clicked.connect(self.delete_record)
             self.delete_button.setEnabled(False)
+            self.delete_button.setStyleSheet(button_style)
             bottom_panel.addWidget(self.delete_button)
         
         bottom_panel.addStretch()
-        
         self.main_layout.addLayout(bottom_panel)
         
     def create_navigation_panel(self):
         """Создает панель навигации со связанными таблицами"""
         self.nav_group = QGroupBox("Навигация")
+        self.nav_group.setStyleSheet("""
+            QGroupBox {
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                color: #21A038;
+                font-weight: bold;
+            }
+        """)
+        
         self.nav_layout = QHBoxLayout()
-        self.nav_layout.addWidget(QLabel("Перейти к:"))
+        nav_label = QLabel("Перейти к:")
+        nav_label.setStyleSheet("color: #666;")
+        self.nav_layout.addWidget(nav_label)
         self.nav_layout.addStretch()
         self.nav_group.setLayout(self.nav_layout)
         self.nav_group.hide()  # По умолчанию скрыта
@@ -116,10 +265,48 @@ class BaseTableWindow(QMainWindow):
         """Добавляет кнопку навигации"""
         button = QPushButton(text)
         button.clicked.connect(callback)
-        button.setEnabled(False)  # По умолчанию кнопки неактивны
+        button.setEnabled(False)
+        button.setStyleSheet("""
+            QPushButton {
+                background-color: white;
+                color: #21A038;
+                border: 2px solid #21A038;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #21A038;
+                color: white;
+            }
+            QPushButton:pressed {
+                background-color: #1E4620;
+                color: white;
+            }
+            QPushButton:disabled {
+                background-color: #F5F5F5;
+                color: #999;
+                border-color: #999;
+            }
+        """)
         self.nav_layout.insertWidget(self.nav_layout.count() - 1, button)
         self.nav_group.show()
         return button
+        
+    def apply_sberbank_style(self):
+        """Применяет общие стили Сбербанка"""
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: white;
+            }
+            QLabel {
+                color: #333;
+            }
+            QGroupBox {
+                font-weight: bold;
+                color: #21A038;
+            }
+        """)
         
     def on_selection_changed(self):
         """Обработчик изменения выделения в таблице"""

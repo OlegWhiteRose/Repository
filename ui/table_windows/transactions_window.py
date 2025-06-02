@@ -10,7 +10,8 @@ from PyQt5.QtWidgets import (
     QDoubleSpinBox,
     QLabel,
     QGroupBox,
-    QHBoxLayout
+    QHBoxLayout,
+    QLineEdit
 )
 from PyQt5.QtCore import Qt, QDateTime
 from datetime import datetime
@@ -33,7 +34,7 @@ class TransactionDialog(QDialog):
         
         # Создаем поля ввода
         self.amount_spin = QDoubleSpinBox()
-        self.amount_spin.setRange(-10000000, 10000000)
+        self.amount_spin.setRange(0, 10000000)  # Изменено с -10000000 на 0 согласно CHECK в БД
         self.amount_spin.setSingleStep(1000)
         self.amount_spin.setPrefix("₽ ")
         
@@ -43,26 +44,22 @@ class TransactionDialog(QDialog):
         
         self.type_combo = QComboBox()
         self.type_combo.addItems([
+            "addition",
             "opening",
             "closing",
-            "early closing",
-            "addition"
+            "early closing"
         ])
-        
-        self.description_edit = QLineEdit()
         
         # Добавляем поля в форму
         form_layout.addRow("Сумма*:", self.amount_spin)
         form_layout.addRow("Дата*:", self.date_edit)
         form_layout.addRow("Тип операции*:", self.type_combo)
-        form_layout.addRow("Описание:", self.description_edit)
         
         # Если редактируем существующую транзакцию
         if self.transaction_data:
             self.amount_spin.setValue(float(self.transaction_data["amount"]))
             self.date_edit.setDateTime(QDateTime.fromString(self.transaction_data["date"], Qt.ISODate))
             self.type_combo.setCurrentText(self.transaction_data["type"])
-            self.description_edit.setText(self.transaction_data["description"])
             
         # Кнопки
         buttons_layout = QVBoxLayout()
@@ -84,8 +81,7 @@ class TransactionDialog(QDialog):
         return {
             "amount": self.amount_spin.value(),
             "date": self.date_edit.dateTime().toString(Qt.ISODate),
-            "type": self.type_combo.currentText(),
-            "description": self.description_edit.text()
+            "type": self.type_combo.currentText()
         }
 
 class TransactionsWindow(BaseTableWindow):
@@ -110,29 +106,34 @@ class TransactionsWindow(BaseTableWindow):
         current_row = self.table.currentRow()
         if current_row >= 0:
             try:
+                # Получаем ID вклада из базы данных
                 query = """
-                    SELECT d.id, d.type, c.last_name || ' ' || c.first_name as client_name
+                    SELECT d.id, d.client_id,
+                           c.last_name || ' ' || c.first_name as client_name,
+                           d.type || ' (' || c.last_name || ' ' || c.first_name || ')' as deposit_info
                     FROM Transaction t
                     JOIN Deposit d ON t.deposit_id = d.id
                     JOIN Client c ON d.client_id = c.id
                     WHERE t.id = %s
                 """
-                deposit = self.db.execute_query(
+                result = self.db.execute_query(
                     query,
                     params=(self.table.item(current_row, 0).text(),),
                     fetch_one=True
                 )
                 
-                if deposit:
+                if result:
+                    deposit_id, client_id, client_name, deposit_info = result
                     from .deposits_window import DepositsWindow
-                    deposits_window = DepositsWindow(self)
+                    deposits_window = DepositsWindow(
+                        self,
+                        client_id=client_id,
+                        client_name=client_name,
+                        deposit_id=deposit_id,
+                        user_role=self.user_role
+                    )
                     deposits_window.show()
-                    # Найти и выделить нужный вклад в таблице
-                    for row in range(deposits_window.table.rowCount()):
-                        if deposits_window.table.item(row, 0).text() == str(deposit[0]):
-                            deposits_window.table.selectRow(row)
-                            break
-                            
+                    
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось открыть окно вклада: {str(e)}")
         
@@ -234,20 +235,16 @@ class TransactionsWindow(BaseTableWindow):
             
     def add_record(self):
         """Добавление новой транзакции"""
-        if not self.deposit_id:
-            QMessageBox.warning(self, "Предупреждение", "Сначала выберите вклад")
-            return
-            
         dialog = TransactionDialog(self)
         if dialog.exec_() == QDialog.Accepted:
             data = dialog.get_data()
             try:
                 query = """
                     INSERT INTO Transaction (
-                        amount, transaction_date,
-                        type, description, deposit_id
+                        amount, date,
+                        type, deposit_id
                     )
-                    VALUES (%s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s)
                     RETURNING id
                 """
                 self.db.execute_query(
@@ -256,7 +253,6 @@ class TransactionsWindow(BaseTableWindow):
                         data["amount"],
                         data["date"],
                         data["type"],
-                        data["description"],
                         self.deposit_id
                     ),
                     commit=True
@@ -273,42 +269,58 @@ class TransactionsWindow(BaseTableWindow):
             QMessageBox.warning(self, "Предупреждение", "Выберите транзакцию для редактирования")
             return
             
-        transaction_data = {
-            "id": self.table.item(current_row, 0).text(),
-            "amount": self.table.item(current_row, 1).text(),
-            "date": self.table.item(current_row, 2).text(),
-            "type": self.table.item(current_row, 3).text(),
-            "description": self.table.item(current_row, 4).text(),
-            "deposit_id": self.table.item(current_row, 5).text()
-        }
-        
-        dialog = TransactionDialog(self, transaction_data)
-        if dialog.exec_() == QDialog.Accepted:
-            data = dialog.get_data()
-            try:
-                query = """
-                    UPDATE Transaction
-                    SET amount = %s,
-                        transaction_date = %s,
-                        type = %s,
-                        description = %s
-                    WHERE id = %s
-                """
-                self.db.execute_query(
-                    query,
-                    params=(
-                        data["amount"],
-                        data["date"],
-                        data["type"],
-                        data["description"],
-                        transaction_data["id"]
-                    ),
-                    commit=True
-                )
-                self.refresh_table()
-                QMessageBox.information(self, "Успех", "Транзакция успешно обновлена")
-            except Exception as e:
-                QMessageBox.critical(self, "Ошибка", f"Не удалось обновить транзакцию: {str(e)}")
+        # Получаем полные данные о транзакции из базы
+        try:
+            query = """
+                SELECT t.id, t.amount, t.date, t.type, t.deposit_id
+                FROM Transaction t
+                WHERE t.id = %s
+            """
+            result = self.db.execute_query(
+                query,
+                params=(self.table.item(current_row, 0).text(),),
+                fetch_one=True
+            )
+            
+            if not result:
+                QMessageBox.warning(self, "Предупреждение", "Транзакция не найдена")
+                return
+                
+            transaction_data = {
+                "id": str(result[0]),
+                "amount": str(result[1]),
+                "date": str(result[2]),
+                "type": result[3],
+                "deposit_id": str(result[4])
+            }
+            
+            dialog = TransactionDialog(self, transaction_data)
+            if dialog.exec_() == QDialog.Accepted:
+                data = dialog.get_data()
+                try:
+                    query = """
+                        UPDATE Transaction
+                        SET amount = %s,
+                            date = %s,
+                            type = %s
+                        WHERE id = %s
+                    """
+                    self.db.execute_query(
+                        query,
+                        params=(
+                            data["amount"],
+                            data["date"],
+                            data["type"],
+                            transaction_data["id"]
+                        ),
+                        commit=True
+                    )
+                    self.refresh_table()
+                    QMessageBox.information(self, "Успех", "Транзакция успешно обновлена")
+                except Exception as e:
+                    QMessageBox.critical(self, "Ошибка", f"Не удалось обновить транзакцию: {str(e)}")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось получить данные транзакции: {str(e)}")
                 
     def delete_record(self):
         """Удаление выбранной транзакции"""
@@ -324,7 +336,7 @@ class TransactionsWindow(BaseTableWindow):
         reply = QMessageBox.question(
             self,
             "Подтверждение",
-            f"Вы уверены, что хотите удалить транзакцию {transaction_type} на сумму {transaction_amount} руб.?",
+            f"Вы уверены, что хотите удалить транзакцию {transaction_type} на сумму {transaction_amount}?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
@@ -339,5 +351,6 @@ class TransactionsWindow(BaseTableWindow):
                 QMessageBox.critical(self, "Ошибка", f"Не удалось удалить транзакцию: {str(e)}")
                 
     def show_related_records(self, row):
-        """У транзакций нет прямых связей с другими таблицами"""
+        """При выделении записи только активируем кнопки навигации"""
+        # Ничего не открываем автоматически, только активируем кнопки
         pass 

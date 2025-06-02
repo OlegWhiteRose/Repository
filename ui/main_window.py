@@ -6,9 +6,10 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QGridLayout,
     QMessageBox,
-    QLabel
+    QLabel,
+    QFrame
 )
-from PyQt5.QtGui import QIcon, QFont
+from PyQt5.QtGui import QIcon, QFont, QColor
 from PyQt5.QtCore import Qt
 
 from .table_windows.clients_window import ClientsWindow
@@ -51,91 +52,168 @@ class MainWindow(QMainWindow):
             raise
             
         self.init_ui()
+        self.apply_sberbank_style()
         
     def init_ui(self):
         """Инициализация пользовательского интерфейса"""
         logger.debug("Started")
         
-        self.setWindowTitle("Банковская система управления вкладами")
-        self.setGeometry(100, 100, 800, 600)
+        self.setWindowTitle("АС Учета вкладов в Сбербанке")
+        self.setGeometry(100, 100, 1200, 800)
         
-        # Создаем центральный виджет и главный layout
+        # Создаем центральный виджет
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
+        main_layout.setSpacing(0)
+        main_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Верхняя панель с информацией о пользователе и кнопкой выхода
-        header_layout = QHBoxLayout()
+        # Создаем навбар
+        navbar = QFrame()
+        navbar.setStyleSheet("""
+            QFrame {
+                background-color: #21A038;
+                min-height: 40px;
+                max-height: 40px;
+            }
+        """)
+        navbar_layout = QHBoxLayout(navbar)
+        navbar_layout.setContentsMargins(20, 0, 20, 0)
+        navbar_layout.setSpacing(10)
+        
+        # Заголовок в навбаре
+        title_label = QLabel("АС Учета вкладов в Сбербанке")
+        title_label.setStyleSheet("""
+            QLabel {
+                color: white;
+                font-size: 14px;
+                font-weight: bold;
+            }
+        """)
+        navbar_layout.addWidget(title_label)
+        
+        # Добавляем растягивающийся элемент
+        navbar_layout.addStretch()
         
         # Информация о пользователе
-        user_info = QLabel(f"Пользователь: {self.username} ({self.user_role})")
-        user_info.setFont(QFont("Arial", 10, QFont.Bold))
-        header_layout.addWidget(user_info)
+        user_label = QLabel(f"Пользователь: {self.username}")
+        user_label.setStyleSheet("""
+            QLabel {
+                color: white;
+                margin-right: 15px;
+            }
+        """)
+        navbar_layout.addWidget(user_label)
         
         # Кнопка выхода
         logout_button = QPushButton("Выйти")
-        logout_button.setFixedWidth(100)
+        logout_button.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: white;
+                border: 1px solid white;
+                padding: 5px 15px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #1E4620;
+            }
+            QPushButton:pressed {
+                background-color: #167025;
+            }
+        """)
         logout_button.clicked.connect(self.logout)
-        header_layout.addWidget(logout_button)
+        navbar_layout.addWidget(logout_button)
         
-        main_layout.addLayout(header_layout)
+        main_layout.addWidget(navbar)
+        
+        # Контейнер для основного содержимого
+        content_container = QWidget()
+        content_container.setStyleSheet("""
+            QWidget {
+                background-color: white;
+            }
+        """)
+        content_layout = QVBoxLayout(content_container)
+        content_layout.setContentsMargins(20, 20, 20, 20)
         
         # Создаем кнопки для разных разделов
         buttons_layout = QVBoxLayout()
         
+        # Стиль для кнопок
+        button_style = """
+            QPushButton {
+                background-color: white;
+                color: #21A038;
+                border: 2px solid #21A038;
+                padding: 10px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #21A038;
+                color: white;
+            }
+            QPushButton:pressed {
+                background-color: #1E4620;
+                color: white;
+            }
+        """
+        
         # Кнопка "Клиенты"
         clients_button = QPushButton("Клиенты")
-        clients_button.setMinimumHeight(50)
+        clients_button.setStyleSheet(button_style)
         clients_button.clicked.connect(self.open_clients_window)
         buttons_layout.addWidget(clients_button)
         
         # Кнопка "Документы"
         documents_button = QPushButton("Документы")
-        documents_button.setMinimumHeight(50)
+        documents_button.setStyleSheet(button_style)
         documents_button.clicked.connect(self.open_documents_window)
         buttons_layout.addWidget(documents_button)
         
         # Кнопка "Вклады"
         deposits_button = QPushButton("Вклады")
-        deposits_button.setMinimumHeight(50)
+        deposits_button.setStyleSheet(button_style)
         deposits_button.clicked.connect(self.open_deposits_window)
         buttons_layout.addWidget(deposits_button)
         
         # Кнопка "Транзакции"
         transactions_button = QPushButton("Транзакции")
-        transactions_button.setMinimumHeight(50)
+        transactions_button.setStyleSheet(button_style)
         transactions_button.clicked.connect(self.open_transactions_window)
         buttons_layout.addWidget(transactions_button)
         
-        # Кнопки доступные только администраторам
-        if self.user_role == "admin":
-            # Кнопка "Сотрудники"
-            employees_button = QPushButton("Сотрудники")
-            employees_button.setMinimumHeight(50)
-            employees_button.clicked.connect(self.open_employees_window)
-            buttons_layout.addWidget(employees_button)
-            
-            # Кнопка "Отчеты"
-            reports_button = QPushButton("Отчеты")
-            reports_button.setMinimumHeight(50)
-            reports_button.clicked.connect(self.open_reports_window)
-            buttons_layout.addWidget(reports_button)
-            
+        # Кнопка "Сотрудники"
+        employees_button = QPushButton("Сотрудники")
+        employees_button.setStyleSheet(button_style)
+        employees_button.clicked.connect(self.open_employees_window)
+        buttons_layout.addWidget(employees_button)
+        
+        # Кнопка "Отчеты"
+        reports_button = QPushButton("Отчеты")
+        reports_button.setStyleSheet(button_style)
+        reports_button.clicked.connect(self.open_reports_window)
+        buttons_layout.addWidget(reports_button)
+
         # Кнопка "Статистика"
         statistics_button = QPushButton("Статистика")
-        statistics_button.setMinimumHeight(50)
+        statistics_button.setStyleSheet(button_style)
         statistics_button.clicked.connect(self.open_statistics_window)
         buttons_layout.addWidget(statistics_button)
-        
-        buttons_layout.addStretch()
-        main_layout.addLayout(buttons_layout)
-        
-        # Добавляем информацию о версии
-        version_label = QLabel("Версия 1.0")
-        version_label.setAlignment(Qt.AlignRight)
-        main_layout.addWidget(version_label)
+            
+        content_layout.addLayout(buttons_layout)
+        main_layout.addWidget(content_container)
         
         logger.debug("UI initialization completed")
+        
+    def apply_sberbank_style(self):
+        """Применяет стиль Сбербанка к окну"""
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: white;
+            }
+        """)
         
     def open_clients_window(self):
         """Открывает окно работы с клиентами"""
@@ -176,8 +254,8 @@ class MainWindow(QMainWindow):
         """Выход из системы"""
         reply = QMessageBox.question(
             self,
-            'Подтверждение',
-            'Вы действительно хотите выйти?',
+            "Подтверждение",
+            "Вы уверены, что хотите выйти из системы?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )

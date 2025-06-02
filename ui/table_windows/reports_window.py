@@ -231,7 +231,6 @@ class ReportDialog(QDialog):
             query = """
                 SELECT id, first_name || ' ' || last_name as full_name
                 FROM Employee
-                WHERE status = 'active'
                 ORDER BY last_name, first_name
             """
             results = self.db.execute_query(query, fetch_all=True)
@@ -325,7 +324,8 @@ class ReportsWindow(BaseTableWindow):
         
     def setup_navigation(self):
         """Настраивает кнопки навигации"""
-        self.add_navigation_button("Сотрудник", self.show_employee)
+        if not self.employee_id:  # Если окно открыто не из окна сотрудника
+            self.add_navigation_button("Сотрудник", self.show_employee)
         self.add_navigation_button("Клиент", self.show_client)
         
     def show_employee(self):
@@ -333,28 +333,29 @@ class ReportsWindow(BaseTableWindow):
         current_row = self.table.currentRow()
         if current_row >= 0:
             try:
+                # Получаем ID сотрудника из базы данных
                 query = """
-                    SELECT e.id, e.first_name, e.last_name
+                    SELECT e.id, e.last_name || ' ' || e.first_name as employee_name
                     FROM Report r
                     JOIN Employee e ON r.employee_id = e.id
                     WHERE r.id = %s
                 """
-                employee = self.db.execute_query(
+                result = self.db.execute_query(
                     query,
                     params=(self.table.item(current_row, 0).text(),),
                     fetch_one=True
                 )
                 
-                if employee:
+                if result:
+                    employee_id, employee_name = result
                     from .employees_window import EmployeesWindow
-                    employees_window = EmployeesWindow(self)
+                    employees_window = EmployeesWindow(
+                        self,
+                        user_role=self.user_role,
+                        specific_id=employee_id
+                    )
                     employees_window.show()
-                    # Найти и выделить нужного сотрудника в таблице
-                    for row in range(employees_window.table.rowCount()):
-                        if employees_window.table.item(row, 0).text() == str(employee[0]):
-                            employees_window.table.selectRow(row)
-                            break
-                            
+                    
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось открыть окно сотрудника: {str(e)}")
                 
@@ -364,36 +365,36 @@ class ReportsWindow(BaseTableWindow):
         if current_row >= 0:
             try:
                 query = """
-                    SELECT c.id, c.first_name, c.last_name
+                    SELECT c.id, c.last_name || ' ' || c.first_name as client_name
                     FROM Report r
                     JOIN Transaction t ON r.transaction_id = t.id
                     JOIN Deposit d ON t.deposit_id = d.id
                     JOIN Client c ON d.client_id = c.id
                     WHERE r.id = %s
                 """
-                client = self.db.execute_query(
+                result = self.db.execute_query(
                     query,
                     params=(self.table.item(current_row, 0).text(),),
                     fetch_one=True
                 )
                 
-                if client:
+                if result:
+                    client_id, client_name = result
                     from .clients_window import ClientsWindow
-                    clients_window = ClientsWindow(self)
+                    clients_window = ClientsWindow(
+                        self,
+                        specific_client_id=client_id,
+                        user_role=self.user_role
+                    )
                     clients_window.show()
-                    # Найти и выделить нужного клиента в таблице
-                    for row in range(clients_window.table.rowCount()):
-                        if clients_window.table.item(row, 0).text() == str(client[0]):
-                            clients_window.table.selectRow(row)
-                            break
-                            
+                    
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось открыть окно клиента: {str(e)}")
                 
     def refresh_table(self):
         """Обновляет данные в таблице"""
         try:
-            query = """
+            base_query = """
                 SELECT r.id, r.creation_date, 
                        e.last_name || ' ' || e.first_name as employee_name,
                        c.last_name || ' ' || c.first_name as client_name,
@@ -404,19 +405,27 @@ class ReportsWindow(BaseTableWindow):
                 JOIN Transaction t ON r.transaction_id = t.id
                 JOIN Deposit d ON t.deposit_id = d.id
                 JOIN Client c ON d.client_id = c.id
-                WHERE (LOWER(e.last_name) LIKE LOWER(%s) OR %s = '')
-                  AND (LOWER(c.last_name) LIKE LOWER(%s) OR %s = '')
-                ORDER BY r.creation_date DESC
+                WHERE 1=1
             """
             
-            params = [
-                f"%{self.search_employee.text()}%" if self.search_employee.text() else "",
-                self.search_employee.text(),
-                f"%{self.search_client.text()}%" if self.search_client.text() else "",
-                self.search_client.text()
-            ]
+            params = []
             
-            results = self.db.execute_query(query, params=params, fetch_all=True)
+            # Фильтр по конкретному сотруднику
+            if self.employee_id:
+                base_query += " AND r.employee_id = %s"
+                params.append(self.employee_id)
+            elif self.search_employee.text():
+                base_query += " AND LOWER(e.last_name) LIKE LOWER(%s)"
+                params.append(f"%{self.search_employee.text()}%")
+                
+            # Фильтр по клиенту
+            if self.search_client.text():
+                base_query += " AND LOWER(c.last_name) LIKE LOWER(%s)"
+                params.append(f"%{self.search_client.text()}%")
+                
+            base_query += " ORDER BY r.creation_date DESC"
+            
+            results = self.db.execute_query(base_query, params=params, fetch_all=True)
             
             self.table.setRowCount(0)
             for row_num, row_data in enumerate(results):
@@ -442,19 +451,18 @@ class ReportsWindow(BaseTableWindow):
             try:
                 query = """
                     INSERT INTO Report (
-                        employee_id, transaction_id,
-                        content, creation_date
+                        content, transaction_id,
+                        employee_id
                     )
-                    VALUES (%s, %s, %s, %s)
+                    VALUES (%s, %s, %s)
                     RETURNING id
                 """
                 self.db.execute_query(
                     query,
                     params=(
-                        data["employee_id"],
-                        data["transaction_id"],
                         data["content"],
-                        data["creation_date"]
+                        data["transaction_id"],
+                        data["employee_id"]
                     ),
                     commit=True
                 )
@@ -470,38 +478,64 @@ class ReportsWindow(BaseTableWindow):
             QMessageBox.warning(self, "Предупреждение", "Выберите отчет для редактирования")
             return
             
-        report_data = {
-            "id": self.table.item(current_row, 0).text(),
-            "employee_name": self.table.item(current_row, 2).text(),
-            "transaction_info": f"{self.table.item(current_row, 5).text()} - {self.table.item(current_row, 3).text()} ({self.table.item(current_row, 4).text()} руб.)",
-            "content": self.table.item(current_row, 6).text()
-        }
-        
-        dialog = ReportDialog(self, report_data)
-        if dialog.exec_() == QDialog.Accepted:
-            data = dialog.get_data()
-            try:
-                query = """
-                    UPDATE Report
-                    SET employee_id = %s,
-                        transaction_id = %s,
-                        content = %s
-                    WHERE id = %s
-                """
-                self.db.execute_query(
-                    query,
-                    params=(
-                        data["employee_id"],
-                        data["transaction_id"],
-                        data["content"],
-                        report_data["id"]
-                    ),
-                    commit=True
-                )
-                self.refresh_table()
-                QMessageBox.information(self, "Успех", "Отчет успешно обновлен")
-            except Exception as e:
-                QMessageBox.critical(self, "Ошибка", f"Не удалось обновить отчет: {str(e)}")
+        # Получаем полные данные об отчете из базы
+        try:
+            query = """
+                SELECT r.id, r.content, r.creation_date, r.transaction_id, r.employee_id,
+                       e.first_name || ' ' || e.last_name as employee_name,
+                       t.type || ' (' || t.amount || ' руб.) от ' || t.date as transaction_info
+                FROM Report r
+                JOIN Employee e ON r.employee_id = e.id
+                JOIN Transaction t ON r.transaction_id = t.id
+                WHERE r.id = %s
+            """
+            result = self.db.execute_query(
+                query,
+                params=(self.table.item(current_row, 0).text(),),
+                fetch_one=True
+            )
+            
+            if not result:
+                QMessageBox.warning(self, "Предупреждение", "Отчет не найден")
+                return
+                
+            report_data = {
+                "id": str(result[0]),
+                "content": result[1],
+                "creation_date": str(result[2]),
+                "transaction_id": str(result[3]),
+                "employee_id": str(result[4]),
+                "employee_name": result[5],
+                "transaction_info": result[6]
+            }
+            
+            dialog = ReportDialog(self, report_data)
+            if dialog.exec_() == QDialog.Accepted:
+                data = dialog.get_data()
+                try:
+                    query = """
+                        UPDATE Report
+                        SET content = %s,
+                            transaction_id = %s,
+                            employee_id = %s
+                        WHERE id = %s
+                    """
+                    self.db.execute_query(
+                        query,
+                        params=(
+                            data["content"],
+                            data["transaction_id"],
+                            data["employee_id"],
+                            report_data["id"]
+                        ),
+                        commit=True
+                    )
+                    self.refresh_table()
+                    QMessageBox.information(self, "Успех", "Отчет успешно обновлен")
+                except Exception as e:
+                    QMessageBox.critical(self, "Ошибка", f"Не удалось обновить отчет: {str(e)}")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось получить данные отчета: {str(e)}")
                 
     def delete_record(self):
         """Удаление выбранного отчета"""
@@ -511,11 +545,12 @@ class ReportsWindow(BaseTableWindow):
             return
             
         report_id = self.table.item(current_row, 0).text()
+        report_title = self.table.item(current_row, 1).text()
         
         reply = QMessageBox.question(
             self,
             "Подтверждение",
-            "Вы уверены, что хотите удалить этот отчет?",
+            f"Вы уверены, что хотите удалить отчет '{report_title}'?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )

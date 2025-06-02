@@ -11,7 +11,8 @@ from PyQt5.QtWidgets import (
     QDoubleSpinBox,
     QGroupBox,
     QHBoxLayout,
-    QLabel
+    QLabel,
+    QSpinBox
 )
 from PyQt5.QtCore import Qt, QDate
 from datetime import datetime
@@ -54,25 +55,28 @@ class DepositDialog(QDialog):
         self.interest_rate_spin.setSuffix("%")
         self.interest_rate_spin.setValue(5.0)
         
-        self.term_spin = QDoubleSpinBox()
-        self.term_spin.setRange(1, 60)
-        self.term_spin.setSingleStep(1)
-        self.term_spin.setSuffix(" мес.")
-        self.term_spin.setValue(12)
+        self.term_spin = QSpinBox()
+        self.term_spin.setRange(1, 3650)  # от 1 дня до 10 лет
+        self.term_spin.setSingleStep(30)
+        self.term_spin.setSuffix(" дн.")
+        self.term_spin.setValue(365)
         
         self.type_combo = QComboBox()
         self.type_combo.addItems([
-            "Срочный",
-            "Накопительный",
-            "До востребования",
-            "Пенсионный"
+            "Savings",
+            "Student",
+            "Student+",
+            "Premier",
+            "Future Care",
+            "Social",
+            "Social+"
         ])
         
         self.status_combo = QComboBox()
         self.status_combo.addItems([
-            "active",
+            "open",
             "closed",
-            "pending"
+            "closed early"
         ])
         
         # Добавляем поля в форму
@@ -91,7 +95,7 @@ class DepositDialog(QDialog):
             if self.deposit_data["close_date"]:
                 self.close_date_edit.setDate(QDate.fromString(self.deposit_data["close_date"], Qt.ISODate))
             self.interest_rate_spin.setValue(float(self.deposit_data["interest_rate"]))
-            self.term_spin.setValue(float(self.deposit_data["term"]))
+            self.term_spin.setValue(int(self.deposit_data["term_days"]))
             self.type_combo.setCurrentText(self.deposit_data["type"])
             self.status_combo.setCurrentText(self.deposit_data["status"])
             
@@ -117,18 +121,19 @@ class DepositDialog(QDialog):
             "open_date": self.open_date_edit.date().toString(Qt.ISODate),
             "close_date": self.close_date_edit.date().toString(Qt.ISODate),
             "interest_rate": self.interest_rate_spin.value(),
-            "term": self.term_spin.value(),
+            "term_days": self.term_spin.value(),
             "type": self.type_combo.currentText(),
             "status": self.status_combo.currentText()
         }
 
 class DepositsWindow(BaseTableWindow):
-    def __init__(self, parent=None, client_id=None, client_name=None, user_role="user"):
+    def __init__(self, parent=None, client_id=None, client_name=None, deposit_id=None, user_role="user"):
         title = f"Вклады - {client_name}" if client_name else "Вклады"
         super().__init__(parent, title=title, user_role=user_role)
         self.db = Database()
         self.client_id = client_id
         self.client_name = client_name
+        self.deposit_id = deposit_id
         self.setup_search_panel()
         self.setup_table()
         self.setup_navigation()
@@ -138,203 +143,273 @@ class DepositsWindow(BaseTableWindow):
         """Настраивает кнопки навигации"""
         if not self.client_id:  # Если окно открыто не из окна клиента
             self.add_navigation_button("Клиент", self.show_client)
-            
+        self.add_navigation_button("Транзакции", self.show_transactions)
+
     def show_client(self):
         """Открывает окно клиента для выбранного вклада"""
         current_row = self.table.currentRow()
         if current_row >= 0:
             try:
+                # Получаем ID клиента из базы данных
                 query = """
-                    SELECT c.id, c.first_name, c.last_name
+                    SELECT c.id, c.last_name || ' ' || c.first_name as client_name
                     FROM Deposit d
                     JOIN Client c ON d.client_id = c.id
                     WHERE d.id = %s
                 """
-                client = self.db.execute_query(
+                result = self.db.execute_query(
                     query,
                     params=(self.table.item(current_row, 0).text(),),
                     fetch_one=True
                 )
                 
-                if client:
+                if result:
+                    client_id, client_name = result
                     from .clients_window import ClientsWindow
-                    clients_window = ClientsWindow(self)
+                    clients_window = ClientsWindow(
+                        self,
+                        specific_client_id=client_id,
+                        user_role=self.user_role
+                    )
                     clients_window.show()
-                    # Найти и выделить нужного клиента в таблице
-                    for row in range(clients_window.table.rowCount()):
-                        if clients_window.table.item(row, 0).text() == str(client[0]):
-                            clients_window.table.selectRow(row)
-                            break
-                            
+                    
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось открыть окно клиента: {str(e)}")
-        
+
+    def show_transactions(self):
+        """Открывает окно транзакций для выбранного вклада"""
+        current_row = self.table.currentRow()
+        if current_row >= 0:
+            try:
+                deposit_id = self.table.item(current_row, 0).text()
+                deposit_info = f"{self.table.item(current_row, 1).text()} ({self.table.item(current_row, 2).text()})"
+                
+                from .transactions_window import TransactionsWindow
+                transactions_window = TransactionsWindow(
+                    self,
+                    deposit_id=deposit_id,
+                    deposit_info=deposit_info,
+                    user_role=self.user_role
+                )
+                transactions_window.show()
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось открыть окно транзакций: {str(e)}")
+
     def setup_search_panel(self):
         """Настраивает панель поиска"""
-        search_group = QGroupBox("Поиск")
+        search_group = QGroupBox("Поиск и фильтры")
         search_layout = QFormLayout()
         
-        # Поиск по типу вклада
-        self.search_type = QComboBox()
-        self.search_type.addItems([
+        # Поиск по клиенту
+        self.search_client_input = QLineEdit()
+        self.search_client_input.setPlaceholderText("Введите имя клиента...")
+        self.search_client_input.textChanged.connect(self.refresh_table)
+        
+        # Фильтр по типу вклада
+        self.filter_type_combo = QComboBox()
+        self.filter_type_combo.addItems([
             "Все типы",
-            "Savings",
-            "Student",
-            "Student+",
-            "Premier",
-            "Future Care",
-            "Social",
-            "Social+"
+            "Срочный",
+            "Накопительный",
+            "До востребования",
+            "Пенсионный"
         ])
-        self.search_type.currentTextChanged.connect(self.refresh_table)
+        self.filter_type_combo.currentIndexChanged.connect(self.refresh_table)
         
-        # Поиск по статусу
-        self.search_status = QComboBox()
-        self.search_status.addItems([
+        # Фильтр по статусу
+        self.filter_status_combo = QComboBox()
+        self.filter_status_combo.addItems([
             "Все статусы",
-            "open",
-            "closed",
-            "closed early"
+            "Открытые",
+            "Закрытые",
+            "Закрытые досрочно"
         ])
-        self.search_status.currentTextChanged.connect(self.refresh_table)
+        self.filter_status_combo.currentIndexChanged.connect(self.refresh_table)
         
-        # Поиск по сумме
-        amount_layout = QHBoxLayout()
-        
-        self.search_amount_from = QDoubleSpinBox()
-        self.search_amount_from.setRange(0, 10000000)
-        self.search_amount_from.setSingleStep(1000)
-        self.search_amount_from.setPrefix("от ₽ ")
-        self.search_amount_from.valueChanged.connect(self.refresh_table)
-        
-        self.search_amount_to = QDoubleSpinBox()
-        self.search_amount_to.setRange(0, 10000000)
-        self.search_amount_to.setSingleStep(1000)
-        self.search_amount_to.setPrefix("до ₽ ")
-        self.search_amount_to.setValue(10000000)
-        self.search_amount_to.valueChanged.connect(self.refresh_table)
-        
-        amount_layout.addWidget(self.search_amount_from)
-        amount_layout.addWidget(self.search_amount_to)
-        
-        search_layout.addRow("Тип вклада:", self.search_type)
-        search_layout.addRow("Статус:", self.search_status)
-        search_layout.addRow("Сумма:", amount_layout)
+        # Добавляем элементы на форму
+        search_layout.addRow("Клиент:", self.search_client_input)
+        search_layout.addRow("Тип вклада:", self.filter_type_combo)
+        search_layout.addRow("Статус:", self.filter_status_combo)
         
         search_group.setLayout(search_layout)
-        self.main_layout.insertWidget(0, search_group)
-        
+        self.main_layout.insertWidget(1, search_group)  # Insert after navbar
+
     def setup_table(self):
-        """Настраивает структуру таблицы"""
+        """Настраивает таблицу"""
         self.table.setColumnCount(9)
         self.table.setHorizontalHeaderLabels([
-            "ID", "Сумма", "Дата закрытия", "Дата открытия",
-            "Процентная ставка", "Статус", "Срок", "Тип", "Клиент"
+            "ID", "Клиент", "Сумма", "Дата открытия", 
+            "Дата закрытия", "Ставка", "Срок", "Тип", "Статус"
         ])
         
+        # Настройка размеров столбцов
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, header.ResizeToContents)  # ID
+        header.setSectionResizeMode(1, header.Stretch)           # Клиент
+        header.setSectionResizeMode(2, header.ResizeToContents)  # Сумма
+        header.setSectionResizeMode(3, header.ResizeToContents)  # Дата открытия
+        header.setSectionResizeMode(4, header.ResizeToContents)  # Дата закрытия
+        header.setSectionResizeMode(5, header.ResizeToContents)  # Ставка
+        header.setSectionResizeMode(6, header.ResizeToContents)  # Срок
+        header.setSectionResizeMode(7, header.ResizeToContents)  # Тип
+        header.setSectionResizeMode(8, header.ResizeToContents)  # Статус
+
     def refresh_table(self):
         """Обновляет данные в таблице"""
         try:
             base_query = """
-                SELECT d.id, d.amount, d.close_date, d.open_date,
-                       d.interest_rate, d.status, d.term, d.type,
-                       c.last_name || ' ' || c.first_name as client_name
+                SELECT 
+                    d.id,
+                    CONCAT(c.last_name, ' ', c.first_name) as client_name,
+                    d.amount,
+                    d.open_date,
+                    d.close_date,
+                    d.interest_rate,
+                    EXTRACT(EPOCH FROM d.term)/86400 as term_days,
+                    d.type,
+                    d.status
                 FROM Deposit d
                 JOIN Client c ON d.client_id = c.id
-                WHERE (d.type = %s OR %s = 'Все типы')
-                  AND (d.status = %s OR %s = 'Все статусы')
-                  AND d.amount BETWEEN %s AND %s
+                WHERE 1=1
             """
             
-            if self.client_id:
+            params = []
+            
+            # Фильтр по конкретному вкладу
+            if self.deposit_id:
+                base_query += " AND d.id = %s"
+                params.append(self.deposit_id)
+            # Фильтр по конкретному клиенту
+            elif self.client_id:
                 base_query += " AND d.client_id = %s"
+                params.append(self.client_id)
+            else:
+                # Применяем остальные фильтры только если не ищем конкретный вклад или клиента
+                if "client_name" in self.get_filter_params():
+                    base_query += " AND (LOWER(c.first_name) LIKE LOWER(%(client_name)s) OR LOWER(c.last_name) LIKE LOWER(%(client_name)s))"
+                if "deposit_type" in self.get_filter_params():
+                    base_query += " AND d.type = %(deposit_type)s"
+                if "status" in self.get_filter_params():
+                    base_query += " AND d.status = %(status)s"
+                params = self.get_filter_params()
                 
             base_query += " ORDER BY d.open_date DESC"
             
-            deposit_type = self.search_type.currentText()
-            status = self.search_status.currentText()
-            amount_from = self.search_amount_from.value()
-            amount_to = self.search_amount_to.value()
+            deposits = self.db.execute_query(base_query, params=params, fetch_all=True)
             
-            params = [
-                deposit_type, deposit_type,
-                status, status,
-                amount_from, amount_to
-            ]
-            
-            if self.client_id:
-                params.append(self.client_id)
+            self.table.setRowCount(len(deposits))
+            for row, dep in enumerate(deposits):
+                # ID
+                self.table.setItem(row, 0, QTableWidgetItem(str(dep[0])))
                 
-            results = self.db.execute_query(base_query, params=params, fetch_all=True)
-            
-            self.table.setRowCount(0)
-            for row_num, row_data in enumerate(results):
-                self.table.insertRow(row_num)
-                for col_num, cell_data in enumerate(row_data):
-                    if isinstance(cell_data, datetime):
-                        cell_data = cell_data.strftime("%Y-%m-%d")
-                    elif isinstance(cell_data, (float, int)) and col_num == 1:  # amount
-                        cell_data = f"{float(cell_data):.2f}"
-                    item = QTableWidgetItem(str(cell_data) if cell_data is not None else "")
-                    if col_num in [0]:  # ID column
-                        item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-                    self.table.setItem(row_num, col_num, item)
-                    
+                # Клиент
+                self.table.setItem(row, 1, QTableWidgetItem(dep[1]))
+                
+                # Сумма
+                amount_item = QTableWidgetItem(f"{dep[2]:,.2f} ₽")
+                amount_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.table.setItem(row, 2, amount_item)
+                
+                # Дата открытия
+                open_date_item = QTableWidgetItem(dep[3].strftime("%d.%m.%Y"))
+                open_date_item.setTextAlignment(Qt.AlignCenter)
+                self.table.setItem(row, 3, open_date_item)
+                
+                # Дата закрытия
+                close_date = dep[4]
+                close_date_item = QTableWidgetItem(
+                    close_date.strftime("%d.%m.%Y") if close_date else "-"
+                )
+                close_date_item.setTextAlignment(Qt.AlignCenter)
+                self.table.setItem(row, 4, close_date_item)
+                
+                # Ставка
+                rate_item = QTableWidgetItem(f"{dep[5]:.2f}%")
+                rate_item.setTextAlignment(Qt.AlignCenter)
+                self.table.setItem(row, 5, rate_item)
+                
+                # Срок
+                term_item = QTableWidgetItem(str(dep[6]))
+                term_item.setTextAlignment(Qt.AlignCenter)
+                self.table.setItem(row, 6, term_item)
+                
+                # Тип
+                self.table.setItem(row, 7, QTableWidgetItem(dep[7]))
+                
+                # Статус
+                status_map = {
+                    "open": "Открыт",
+                    "closed": "Закрыт",
+                    "closed early": "Закрыт досрочно"
+                }
+                status_item = QTableWidgetItem(status_map.get(dep[8], dep[8]))
+                status_item.setTextAlignment(Qt.AlignCenter)
+                self.table.setItem(row, 8, status_item)
+                
         except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить данные: {str(e)}")
+            QMessageBox.critical(
+                self,
+                "Ошибка",
+                f"Не удалось загрузить данные:\n{str(e)}"
+            )
+            self.table.setRowCount(0)
+
+    def get_filter_params(self):
+        """Возвращает параметры фильтрации"""
+        params = {}
+        
+        # Фильтр по клиенту
+        client_name = self.search_client_input.text().strip()
+        if client_name:
+            params["client_name"] = f"%{client_name}%"
             
+        # Фильтр по типу вклада
+        deposit_type = self.filter_type_combo.currentText()
+        if deposit_type != "Все типы":
+            params["deposit_type"] = deposit_type
+            
+        # Фильтр по статусу
+        status = self.filter_status_combo.currentText()
+        if status != "Все статусы":
+            status_map = {
+                "Открытые": "open",
+                "Закрытые": "closed",
+                "Закрытые досрочно": "closed early"
+            }
+            params["status"] = status_map.get(status)
+            
+        return params
+
     def add_record(self):
         """Добавление нового вклада"""
-        if not self.client_id:
-            QMessageBox.warning(self, "Предупреждение", "Сначала выберите клиента")
-            return
-            
         dialog = DepositDialog(self)
         if dialog.exec_() == QDialog.Accepted:
             data = dialog.get_data()
             try:
-                # Начинаем транзакцию
-                with self.db.get_connection() as conn:
-                    with conn.cursor() as cursor:
-                        # Создаем вклад
-                        cursor.execute("""
-                            INSERT INTO Deposit (
-                                amount, open_date, close_date,
-                                interest_rate, status, term,
-                                type, client_id
-                            )
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                            RETURNING id
-                        """, (
-                            data["amount"],
-                            data["open_date"],
-                            data["close_date"],
-                            data["interest_rate"],
-                            data["status"],
-                            data["term"],
-                            data["type"],
-                            self.client_id
-                        ))
-                        
-                        deposit_id = cursor.fetchone()[0]
-                        
-                        # Создаем транзакцию открытия вклада
-                        cursor.execute("""
-                            INSERT INTO Transaction (
-                                amount, transaction_date,
-                                type, description, deposit_id
-                            )
-                            VALUES (%s, %s, %s, %s, %s)
-                        """, (
-                            data["amount"],
-                            data["open_date"],
-                            "opening",
-                            f"Открытие {data['type'].lower()} вклада",
-                            deposit_id
-                        ))
-                        
-                        conn.commit()
-                        
+                query = """
+                    INSERT INTO Deposit (
+                        type, interest_rate, open_date,
+                        close_date, amount, status,
+                        term, client_id
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, (%s || ' days')::interval, %s)
+                    RETURNING id
+                """
+                self.db.execute_query(
+                    query,
+                    params=(
+                        data["type"],
+                        data["interest_rate"],
+                        data["open_date"],
+                        data["close_date"],
+                        data["amount"],
+                        data["status"],
+                        data["term_days"],
+                        self.client_id
+                    ),
+                    commit=True
+                )
                 self.refresh_table()
                 QMessageBox.information(self, "Успех", "Вклад успешно добавлен")
             except Exception as e:
@@ -347,51 +422,73 @@ class DepositsWindow(BaseTableWindow):
             QMessageBox.warning(self, "Предупреждение", "Выберите вклад для редактирования")
             return
             
-        deposit_data = {
-            "id": self.table.item(current_row, 0).text(),
-            "amount": self.table.item(current_row, 1).text(),
-            "close_date": self.table.item(current_row, 2).text(),
-            "open_date": self.table.item(current_row, 3).text(),
-            "interest_rate": self.table.item(current_row, 4).text(),
-            "status": self.table.item(current_row, 5).text(),
-            "term": self.table.item(current_row, 6).text(),
-            "type": self.table.item(current_row, 7).text(),
-            "client_id": self.table.item(current_row, 8).text()
-        }
-        
-        dialog = DepositDialog(self, deposit_data)
-        if dialog.exec_() == QDialog.Accepted:
-            data = dialog.get_data()
-            try:
-                query = """
-                    UPDATE Deposit
-                    SET amount = %s,
-                        open_date = %s,
-                        close_date = %s,
-                        interest_rate = %s,
-                        status = %s,
-                        term = %s,
-                        type = %s
-                    WHERE id = %s
-                """
-                self.db.execute_query(
-                    query,
-                    params=(
-                        data["amount"],
-                        data["open_date"],
-                        data["close_date"],
-                        data["interest_rate"],
-                        data["status"],
-                        data["term"],
-                        data["type"],
-                        deposit_data["id"]
-                    ),
-                    commit=True
-                )
-                self.refresh_table()
-                QMessageBox.information(self, "Успех", "Вклад успешно обновлен")
-            except Exception as e:
-                QMessageBox.critical(self, "Ошибка", f"Не удалось обновить вклад: {str(e)}")
+        # Получаем полные данные о вкладе из базы
+        try:
+            query = """
+                SELECT d.id, d.type, d.interest_rate, d.open_date, d.close_date,
+                       d.amount, d.status, 
+                       EXTRACT(EPOCH FROM d.term)/86400 as term_days,
+                       d.client_id
+                FROM Deposit d
+                WHERE d.id = %s
+            """
+            result = self.db.execute_query(
+                query,
+                params=(self.table.item(current_row, 0).text(),),
+                fetch_one=True
+            )
+            
+            if not result:
+                QMessageBox.warning(self, "Предупреждение", "Вклад не найден")
+                return
+                
+            deposit_data = {
+                "id": str(result[0]),
+                "type": result[1],
+                "interest_rate": str(result[2]),
+                "open_date": str(result[3]),
+                "close_date": str(result[4]) if result[4] else "",
+                "amount": str(result[5]),
+                "status": result[6],
+                "term_days": int(result[7]),
+                "client_id": str(result[8])
+            }
+            
+            dialog = DepositDialog(self, deposit_data)
+            if dialog.exec_() == QDialog.Accepted:
+                data = dialog.get_data()
+                try:
+                    query = """
+                        UPDATE Deposit
+                        SET type = %s,
+                            interest_rate = %s,
+                            open_date = %s,
+                            close_date = %s,
+                            amount = %s,
+                            status = %s,
+                            term = (%s || ' days')::interval
+                        WHERE id = %s
+                    """
+                    self.db.execute_query(
+                        query,
+                        params=(
+                            data["type"],
+                            data["interest_rate"],
+                            data["open_date"],
+                            data["close_date"],
+                            data["amount"],
+                            data["status"],
+                            data["term_days"],
+                            deposit_data["id"]
+                        ),
+                        commit=True
+                    )
+                    self.refresh_table()
+                    QMessageBox.information(self, "Успех", "Вклад успешно обновлен")
+                except Exception as e:
+                    QMessageBox.critical(self, "Ошибка", f"Не удалось обновить вклад: {str(e)}")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось получить данные вклада: {str(e)}")
                 
     def delete_record(self):
         """Удаление выбранного вклада"""
@@ -401,18 +498,31 @@ class DepositsWindow(BaseTableWindow):
             return
             
         deposit_id = self.table.item(current_row, 0).text()
-        deposit_type = self.table.item(current_row, 7).text()
+        deposit_type = self.table.item(current_row, 1).text()
+        deposit_amount = self.table.item(current_row, 5).text()
         
         reply = QMessageBox.question(
             self,
             "Подтверждение",
-            f"Вы уверены, что хотите удалить {deposit_type.lower()} вклад (ID: {deposit_id})?",
+            f"Вы уверены, что хотите удалить вклад {deposit_type} на сумму {deposit_amount}?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
         
         if reply == QMessageBox.Yes:
             try:
+                # Проверяем наличие связанных транзакций
+                query = "SELECT COUNT(*) FROM Transaction WHERE deposit_id = %s"
+                result = self.db.execute_query(query, params=(deposit_id,), fetch_one=True)
+                
+                if result[0] > 0:
+                    QMessageBox.warning(
+                        self,
+                        "Предупреждение",
+                        "Невозможно удалить вклад, так как с ним связаны транзакции"
+                    )
+                    return
+                    
                 query = "DELETE FROM Deposit WHERE id = %s"
                 self.db.execute_query(query, params=(deposit_id,), commit=True)
                 self.refresh_table()
@@ -421,16 +531,6 @@ class DepositsWindow(BaseTableWindow):
                 QMessageBox.critical(self, "Ошибка", f"Не удалось удалить вклад: {str(e)}")
                 
     def show_related_records(self, row):
-        """Показывает связанные записи для выбранного вклада"""
-        if row < 0:
-            return
-            
-        deposit_id = self.table.item(row, 0).text()
-        deposit_type = self.table.item(row, 7).text()
-        
-        # Открываем окно транзакций для этого вклада
-        transactions_window = TransactionsWindow(
-            self, deposit_id=deposit_id,
-            deposit_info=f"{deposit_type} (ID: {deposit_id})"
-        )
-        transactions_window.show() 
+        """При выделении записи только активируем кнопки навигации"""
+        # Ничего не открываем автоматически, только активируем кнопки
+        pass 
