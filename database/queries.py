@@ -1,8 +1,10 @@
 class Queries:
     # --- Users (for Login) ---
-    GET_USER_BY_USERNAME = (
-        "SELECT user_id, username, password_hash, role FROM users WHERE username = %s"
-    )
+    GET_USER_BY_USERNAME = """
+        SELECT user_id, username, password_hash, role
+        FROM users
+        WHERE username = %s
+    """
 
     # --- Legal Entities ---
     GET_ALL_ENTITIES = """
@@ -354,4 +356,247 @@ class Queries:
             )
 
        ORDER BY result_type, emission_date DESC NULLS LAST, sale_date DESC NULLS LAST
+    """
+
+    # --- Clients ---
+    GET_ALL_CLIENTS = """
+        SELECT c.id, c.first_name, c.last_name, c.phone
+        FROM Client c
+        WHERE (LOWER(c.first_name) LIKE LOWER(%s) OR %s IS NULL)
+          AND (LOWER(c.last_name) LIKE LOWER(%s) OR %s IS NULL)
+          AND (c.phone LIKE %s OR %s IS NULL)
+        ORDER BY c.last_name, c.first_name
+    """
+    GET_CLIENT_BY_ID = """
+        SELECT c.id, c.first_name, c.last_name, c.phone
+        FROM Client c
+        WHERE c.id = %s
+    """
+    ADD_CLIENT = """
+        INSERT INTO Client (first_name, last_name, phone)
+        VALUES (%s, %s, %s)
+        RETURNING id
+    """
+    UPDATE_CLIENT = """
+        UPDATE Client
+        SET first_name = %s,
+            last_name = %s,
+            phone = %s
+        WHERE id = %s
+    """
+    DELETE_CLIENT = """
+        DELETE FROM Client
+        WHERE id = %s
+    """
+    CHECK_CLIENT_PHONE_EXISTS = """
+        SELECT 1
+        FROM Client
+        WHERE phone = %s
+          AND (id != %s OR %s IS NULL)
+        LIMIT 1
+    """
+
+    # --- Documents ---
+    GET_CLIENT_DOCUMENTS = """
+        SELECT d.id, d.passport_number, d.birth_date, d.gender,
+               d.agreement_date, d.security_word, d.agreement_status
+        FROM Document d
+        WHERE d.client_id = %s
+        ORDER BY d.agreement_date DESC
+    """
+    GET_DOCUMENT_BY_ID = """
+        SELECT d.id, d.passport_number, d.birth_date, d.gender,
+               d.client_id, d.agreement_date, d.security_word, d.agreement_status
+        FROM Document d
+        WHERE d.id = %s
+    """
+    ADD_DOCUMENT = """
+        INSERT INTO Document (
+            passport_number, birth_date, gender, client_id,
+            agreement_date, security_word, agreement_status
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        RETURNING id
+    """
+    UPDATE_DOCUMENT = """
+        UPDATE Document
+        SET passport_number = %s,
+            birth_date = %s,
+            gender = %s,
+            agreement_date = %s,
+            security_word = %s,
+            agreement_status = %s
+        WHERE id = %s
+    """
+    DELETE_DOCUMENT = """
+        DELETE FROM Document
+        WHERE id = %s
+    """
+
+    # --- Deposits ---
+    GET_ALL_DEPOSITS = """
+        SELECT d.id, c.first_name, c.last_name, d.amount,
+               d.open_date, d.close_date, d.interest_rate,
+               d.status, d.term, d.type
+        FROM Deposit d
+        JOIN Client c ON d.client_id = c.id
+        WHERE (LOWER(c.first_name) LIKE LOWER(%s) OR %s IS NULL)
+          AND (LOWER(c.last_name) LIKE LOWER(%s) OR %s IS NULL)
+          AND (d.status = %s OR %s IS NULL)
+          AND (d.type = %s OR %s IS NULL)
+          AND (d.open_date >= %s OR %s IS NULL)
+          AND (d.open_date <= %s OR %s IS NULL)
+        ORDER BY d.open_date DESC
+    """
+    GET_DEPOSIT_BY_ID = """
+        SELECT d.id, d.amount, d.close_date, d.open_date,
+               d.interest_rate, d.status, d.term, d.type, d.client_id
+        FROM Deposit d
+        WHERE d.id = %s
+    """
+    ADD_DEPOSIT = """
+        INSERT INTO Deposit (
+            amount, close_date, open_date, interest_rate,
+            status, term, type, client_id
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id
+    """
+    UPDATE_DEPOSIT = """
+        UPDATE Deposit
+        SET amount = %s,
+            close_date = %s,
+            open_date = %s,
+            interest_rate = %s,
+            status = %s,
+            term = %s,
+            type = %s
+        WHERE id = %s
+    """
+    UPDATE_DEPOSIT_AMOUNT = """
+        UPDATE Deposit
+        SET amount = amount + %s
+        WHERE id = %s
+    """
+    CLOSE_DEPOSIT = """
+        UPDATE Deposit
+        SET status = %s,
+            close_date = %s
+        WHERE id = %s
+    """
+    DELETE_DEPOSIT = "DELETE FROM Deposit WHERE id = %s"
+
+    # --- Transactions ---
+    GET_DEPOSIT_TRANSACTIONS = """
+        SELECT t.id, t.amount, t.date, t.type
+        FROM Transaction t
+        WHERE t.deposit_id = %s
+        ORDER BY t.date DESC
+    """
+    GET_ALL_TRANSACTIONS = """
+        SELECT t.id, t.amount, t.date, t.type,
+               d.id as deposit_id, d.type as deposit_type,
+               c.id as client_id, c.first_name, c.last_name
+        FROM Transaction t
+        JOIN Deposit d ON t.deposit_id = d.id
+        JOIN Client c ON d.client_id = c.id
+        ORDER BY t.date DESC
+    """
+    ADD_TRANSACTION = """
+        INSERT INTO Transaction (deposit_id, amount, date, type)
+        VALUES (%s, %s, %s, %s)
+        RETURNING id
+    """
+    UPDATE_TRANSACTION = """
+        UPDATE Transaction
+        SET deposit_id = %s, amount = %s, date = %s, type = %s
+        WHERE id = %s
+    """
+    DELETE_TRANSACTION = "DELETE FROM Transaction WHERE id = %s"
+
+    # --- Employees ---
+    GET_ALL_EMPLOYEES = """
+        SELECT e.id, e.first_name, e.last_name, e.phone
+        FROM Employee e
+        ORDER BY e.last_name, e.first_name
+    """
+    GET_EMPLOYEE_BY_ID = """
+        SELECT e.id, e.first_name, e.last_name, e.phone
+        FROM Employee e
+        WHERE e.id = %s
+    """
+    ADD_EMPLOYEE = """
+        INSERT INTO Employee (first_name, last_name, phone)
+        VALUES (%s, %s, %s)
+        RETURNING id
+    """
+    UPDATE_EMPLOYEE = """
+        UPDATE Employee
+        SET first_name = %s,
+            last_name = %s,
+            phone = %s
+        WHERE id = %s
+    """
+    DELETE_EMPLOYEE = """
+        DELETE FROM Employee
+        WHERE id = %s
+    """
+    CHECK_EMPLOYEE_PHONE_EXISTS = """
+        SELECT 1
+        FROM Employee
+        WHERE phone = %s
+          AND (id != %s OR %s IS NULL)
+        LIMIT 1
+    """
+
+    # --- Reports ---
+    GET_ALL_REPORTS = """
+        SELECT r.id, r.content, r.creation_date,
+               t.id as transaction_id, t.type as transaction_type,
+               e.first_name as emp_first_name, e.last_name as emp_last_name
+        FROM Report r
+        JOIN Transaction t ON r.transaction_id = t.id
+        JOIN Employee e ON r.employee_id = e.id
+        WHERE (LOWER(e.first_name) LIKE LOWER(%s) OR %s IS NULL)
+          AND (LOWER(e.last_name) LIKE LOWER(%s) OR %s IS NULL)
+          AND (t.type = %s OR %s IS NULL)
+          AND (r.creation_date >= %s OR %s IS NULL)
+          AND (r.creation_date <= %s OR %s IS NULL)
+        ORDER BY r.creation_date DESC
+    """
+    ADD_REPORT = """
+        INSERT INTO Report (content, creation_date, transaction_id, employee_id)
+        VALUES (%s, %s, %s, %s) RETURNING id
+    """
+    DELETE_REPORT = "DELETE FROM Report WHERE id = %s"
+
+    # --- Analytics ---
+    GET_DEPOSITS_BY_STATUS = """
+        SELECT status, COUNT(*) as count, SUM(amount) as total_amount
+        FROM Deposit
+        GROUP BY status
+        ORDER BY status
+    """
+    GET_DEPOSITS_BY_TYPE = """
+        SELECT type, COUNT(*) as count, SUM(amount) as total_amount,
+               AVG(interest_rate) as avg_rate
+        FROM Deposit
+        GROUP BY type
+        ORDER BY count DESC
+    """
+    GET_CLIENT_DEPOSITS = """
+        SELECT c.first_name, c.last_name,
+               COUNT(d.id) as deposits_count,
+               SUM(d.amount) as total_amount
+        FROM Client c
+        LEFT JOIN Deposit d ON c.id = d.client_id
+        GROUP BY c.id, c.first_name, c.last_name
+        ORDER BY total_amount DESC NULLS LAST
+    """
+    GET_TRANSACTION_SUMMARY = """
+        SELECT t.type, COUNT(*) as count, SUM(t.amount) as total_amount
+        FROM Transaction t
+        WHERE t.date BETWEEN %s AND %s
+        GROUP BY t.type
+        ORDER BY count DESC
     """

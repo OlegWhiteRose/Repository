@@ -1,108 +1,104 @@
 import sys
 from PyQt5.QtWidgets import (
     QDialog,
-    QVBoxLayout,
-    QHBoxLayout,
-    QLabel,
+    QFormLayout,
     QLineEdit,
-    QPushButton,
-    QMessageBox,
     QDialogButtonBox,
+    QMessageBox,
 )
 from PyQt5.QtCore import Qt
 
 # Импортируем КЛАССЫ, а не объекты
 from database.db import Database
 from database.queries import Queries
-import bcrypt
 import psycopg2
+import hashlib
 
 
 class LoginDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Авторизация")
-        self.setModal(True)
-        self.db = Database()  # Создаем экземпляр Database
-        self._user_role = None
-        self._username = None
+        self.db = Database()
+        self.username = None
+        self.user_role = None
 
+        self.setWindowTitle("Вход в систему")
+        self.setModal(True)
+        self.setMinimumWidth(300)
         self.init_ui()
 
     def init_ui(self):
-        layout = QVBoxLayout(self)  # Указываем родителя
-        form_layout = QVBoxLayout()  # Используем QVBoxLayout для полей
+        layout = QFormLayout(self)
 
         self.username_input = QLineEdit()
-        self.username_input.setPlaceholderText("Имя пользователя")
+        self.username_input.setPlaceholderText("Введите имя пользователя")
+        
         self.password_input = QLineEdit()
-        self.password_input.setPlaceholderText("Пароль")
+        self.password_input.setPlaceholderText("Введите пароль")
         self.password_input.setEchoMode(QLineEdit.Password)
 
-        form_layout.addWidget(QLabel("Введите ваши учетные данные:"))
-        form_layout.addWidget(self.username_input)
-        form_layout.addWidget(self.password_input)
-
-        layout.addLayout(form_layout)  # Добавляем layout с полями
+        layout.addRow("Пользователь*:", self.username_input)
+        layout.addRow("Пароль*:", self.password_input)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.button(QDialogButtonBox.Ok).setText("Войти")
-        # Ok -> accept, Cancel -> reject по умолчанию, но мы переопределяем Ok
-        buttons.accepted.connect(self.handle_login)
+        buttons.accepted.connect(self.accept_data)
         buttons.rejected.connect(self.reject)
 
-        layout.addWidget(buttons)
-        self.username_input.setFocus()
+        layout.addRow(buttons)
 
-    def handle_login(self):
-        username = self.username_input.text().strip()
-        password = self.password_input.text()
+    def get_credentials(self):
+        return (
+            self.username_input.text().strip(),
+            self.password_input.text().strip()
+        )
 
-        if not username or not password:
-            QMessageBox.warning(
-                self, "Ошибка", "Имя пользователя и пароль не могут быть пустыми."
-            )
+    def accept_data(self):
+        username, password = self.get_credentials()
+
+        # Validation
+        errors = []
+        if not username:
+            errors.append("Введите имя пользователя")
+        if not password:
+            errors.append("Введите пароль")
+
+        if errors:
+            QMessageBox.warning(self, "Ошибка валидации", "\n".join(errors))
             return
+
+        # Hash password
+        password_hash = hashlib.sha256(password.encode()).hexdigest()
 
         try:
             with self.db.get_connection() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute(Queries.GET_USER_BY_USERNAME, (username,))
-                    user_data = cursor.fetchone()
+                    cursor.execute(
+                        Queries.GET_USER_BY_USERNAME,
+                        (username,)
+                    )
+                    user = cursor.fetchone()
 
-                    if user_data:
-                        user_id, db_username, password_hash, role = user_data
-                        if bcrypt.checkpw(
-                            password.encode("utf-8"), password_hash.encode("utf-8")
-                        ):
-                            self._user_role = role
-                            self._username = db_username
-                            # Если проверка прошла, вызываем стандартный accept()
-                            super().accept()  # Используем super() для вызова родительского метода
-                        else:
-                            QMessageBox.warning(self, "Ошибка", "Неверный пароль.")
-                            self.password_input.clear()
-                            self.password_input.setFocus()
-                    else:
+                    if not user or user[2] != password_hash:
                         QMessageBox.warning(
-                            self, "Ошибка", "Пользователь с таким именем не найден."
+                            self,
+                            "Ошибка входа",
+                            "Неверное имя пользователя или пароль"
                         )
-                        self.username_input.selectAll()  # Выделить текст для удобства
-                        self.username_input.setFocus()
+                        return
 
-        except psycopg2.OperationalError as db_err:
+                    self.username = username
+                    self.user_role = user[3]
+                    super().accept()
+
+        except psycopg2.Error as e:
             QMessageBox.critical(
-                self, "Ошибка БД", f"Не удалось выполнить вход:\n{db_err}"
+                self,
+                "Ошибка БД",
+                f"Не удалось выполнить вход:\n{str(e)}"
             )
-            # Не закрываем диалог, даем пользователю шанс попробовать снова или отменить
-        except Exception as e:
-            QMessageBox.critical(
-                self, "Ошибка", f"Произошла непредвиденная ошибка:\n{e}"
-            )
-            # Можно self.reject() здесь, если ошибка фатальная
 
     def get_user_role(self):
-        return self._user_role
+        return self.user_role
 
     def get_username(self):
-        return self._username
+        return self.username
